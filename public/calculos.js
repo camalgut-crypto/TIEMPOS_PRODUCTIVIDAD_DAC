@@ -131,9 +131,18 @@
     const solPorId = new Map((D.solicitudes || []).map((s) => [s.solicitud, s]));
 
     // Tiempo de la solicitud = último tramo de análisis cerrado; el caso queda a ese analista
+    // El caso queda a quien dio la última decisión (aprobado/rechazado por analista, TUD o preaprobado condicionado).
+    // Si esa decisión cierra un reprocesamiento, queda al analista que dejó la solicitud en preaprobado condicionado.
+    // El tiempo de la solicitud es el del tramo de ese analista.
+    const esDecision = (e) => !!e && (e === 'APROBADO POR ANALISTA' || e === 'RECHAZADO POR ANALISTA'
+      || e === 'PREAPROBADO CONDICIONADO' || e.startsWith('TUD'));
     function global(s) {
-      const tr = (tramosPorSol.get(s.solicitud) || []).filter((t) => t.tipo === 'analisis' && t.fin);
-      const u = tr[tr.length - 1];
+      const tr = (tramosPorSol.get(s.solicitud) || []).filter((t) => t.fin);
+      const analisis = tr.filter((t) => t.tipo === 'analisis');
+      const dec = tr.filter((t) => esDecision(t.fin_estado));
+      let u = dec[dec.length - 1];
+      if (u && u.tipo === 'reproceso') u = analisis.filter((t) => t.fin <= u.inicio).pop();
+      if (!u) u = analisis[analisis.length - 1]; // sin decisión: último tramo de análisis
       return u ? { analista: u.analista, segundos: segundosTramo(u), tramo: u } : null;
     }
 
@@ -159,7 +168,12 @@
     const dispTotal = C.analistas.reduce((t, a) => t + C.disponibilidad(a.nombre, desde, hasta, false), 0);
     const depto = { n: sols.length, reestructuras: sols.filter((s) => s.reestructura).length, diasHabiles: dh,
       diasMes: C.diasHabilesTotales(desde, hasta), analistas: C.analistas.length, disp: dispTotal,
-      equiv: dh ? dispTotal / dh : 0, porDia: dh ? sols.length / dh : null, prod: dispTotal ? sols.length / dispTotal : null };
+      equiv: dh ? dispTotal / dh : 0, porDia: dh ? sols.length / dh : null, prod: null, peso: {} };
+    // Productividad del departamento: promedio de la productividad de cada producto, ponderado por su peso en solicitudes
+    const conProd = PRODUCTOS.filter((p) => porProducto[p].prod != null);
+    const nPond = conProd.reduce((t, p) => t + porProducto[p].n, 0);
+    for (const p of PRODUCTOS) depto.peso[p] = nPond && porProducto[p].prod != null ? porProducto[p].n / nPond : 0;
+    if (nPond) depto.prod = conProd.reduce((t, p) => t + porProducto[p].prod * depto.peso[p], 0);
 
     // Por analista: cada solicitud cuenta para cada analista que intervino (aunque sea de otro producto)
     const part = new Map();

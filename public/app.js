@@ -160,7 +160,7 @@
       </div>
       <div class="kpis">
         <div class="kpi"><div class="l">Solicitudes DAC</div><div class="v">${n0(M.depto.n)}</div><div class="s">${n0(M.depto.reestructuras)} reestructuras · ${n2(M.depto.porDia)} por día hábil</div></div>
-        <div class="kpi verde"><div class="l">Productividad del departamento</div><div class="v">${n2(M.depto.prod)}</div><div class="s">solicitudes / día hábil / analista · ${n2(M.depto.equiv)} analistas</div></div>
+        <div class="kpi verde"><div class="l">Productividad del departamento</div><div class="v">${n2(M.depto.prod)}</div><div class="s">ponderada por producto · ${DAC.PRODUCTOS.map((p) => `${p} ${pct(M.depto.peso[p])}`).join(' · ')}</div></div>
         <div class="kpi cielo"><div class="l">Tiempo de la solicitud</div><div class="v">${dur(T.mediana)}</div><div class="s">mediana · promedio ${dur(T.prom)}</div></div>
         <div class="kpi lima"><div class="l">Dentro de ${meta} min</div><div class="v">${pct(T.enMeta)}</div><div class="s">${n0(T.n)} solicitudes con tiempo medido</div></div>
         <div class="kpi naranja"><div class="l">Preaprobado condicionado</div><div class="v">${n0(R.n)}</div><div class="s">reprocesos · mediana ${dur(R.mediana)}</div></div>
@@ -305,17 +305,17 @@
     const [d, h] = rangoMes(S.mes);
     const C = S.C, M = DAC.metricas(C, S.D, d, h, { tipo: S.tipo }), meta = Number(C.cfg.meta_minutos);
     const tiempoProd = (p) => DAC.resumenTiempos(M.sols.filter((s) => !s.reestructura && (!p || s.producto === p)).map((s) => C.global(s)).filter(Boolean).map((g) => g.segundos), meta);
-    const fila = (nom, x, R, cls = '') => `<tr class="${cls}"><td>${nom}</td><td class="num">${n0(x.n)}</td><td class="num">${n2(M.depto.diasHabiles)}</td><td class="num">${n2(x.porDia)}</td>
+    const fila = (nom, x, R, peso, cls = '') => `<tr class="${cls}"><td>${nom}</td><td class="num">${n0(x.n)}</td><td class="num">${pct(peso)}</td><td class="num">${n2(M.depto.diasHabiles)}</td><td class="num">${n2(x.porDia)}</td>
       <td class="num">${x.analistas}</td><td class="num">${n2(x.equiv)}</td><td class="num"><b>${n2(x.prod)}</b></td><td class="num">${dur(R.mediana)}</td><td class="num">${pct(R.enMeta)}</td></tr>`;
     return `${filtros({ producto: false })}
       <div class="card"><h3>Departamento de Análisis · ${mesTxt(S.mes)}</h3>
         <p class="muted small">${notaHoy(M)}</p>
-        <div class="nota">Productividad = solicitudes que pasaron por POR ASIGNAR A ANALISTA ÷ días hábiles ÷ analistas.
-          Los analistas se cuentan por su disponibilidad: si alguien tuvo vacaciones, cuenta solo por los días que estuvo.
-          Por producto se usan solo las solicitudes de ese producto y los analistas asignados a él.</div>
-        <div class="tabla"><table><thead><tr><th>Producto</th><th class="num">Solicitudes</th><th class="num">Días hábiles</th><th class="num">Solicitudes por día</th><th class="num">Analistas</th><th class="num">Analistas disponibles</th><th class="num">Productividad</th><th class="num">Tiempo mediano</th><th class="num">≤ ${meta} min</th></tr></thead><tbody>
-        ${DAC.PRODUCTOS.map((p) => fila(prodTag(p), M.porProducto[p], tiempoProd(p))).join('')}
-        ${fila('Departamento', M.depto, tiempoProd(null), 'total')}</tbody></table></div>
+        <div class="nota">Productividad del producto = solicitudes del producto que pasaron por POR ASIGNAR A ANALISTA ÷ días hábiles ÷ analistas del producto
+          (contados por su disponibilidad: si alguien tuvo vacaciones, cuenta solo por los días que estuvo).
+          Productividad del departamento = promedio de la productividad de cada producto, ponderado por su peso en solicitudes.</div>
+        <div class="tabla"><table><thead><tr><th>Producto</th><th class="num">Solicitudes</th><th class="num">Peso</th><th class="num">Días hábiles</th><th class="num">Solicitudes por día</th><th class="num">Analistas</th><th class="num">Analistas disponibles</th><th class="num">Productividad</th><th class="num">Tiempo mediano</th><th class="num">≤ ${meta} min</th></tr></thead><tbody>
+        ${DAC.PRODUCTOS.map((p) => fila(prodTag(p), M.porProducto[p], tiempoProd(p), M.depto.peso[p])).join('')}
+        ${fila('Departamento', M.depto, tiempoProd(null), 1, 'total')}</tbody></table></div>
         <p class="muted small">Incluye ${n0(M.depto.reestructuras)} reestructuras (cuentan para productividad; no para tiempos).</p></div>
       <div class="card"><h3>Distribución del tiempo de la solicitud por producto</h3>${notaTiempos()}
         ${tablaTiempos(DAC.PRODUCTOS.map((p) => ({ nombre: prodTag(p), valores: M.sols.filter((s) => !s.reestructura && s.producto === p).map((s) => C.global(s)).filter(Boolean).map((g) => g.segundos) })), meta, 'Producto')}</div>`;
