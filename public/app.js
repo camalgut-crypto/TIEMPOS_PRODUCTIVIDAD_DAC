@@ -34,7 +34,14 @@
     const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
     return h ? `${h}:${String(m).padStart(2, '0')}:${String(x).padStart(2, '0')} h` : `${m}:${String(x).padStart(2, '0')} min`;
   };
-  const fh = (s) => (s ? s.replace('T', ' ').slice(0, 16) : '—');
+  // Fechas con zona horaria (las que pone Supabase) se muestran en hora local; las del histórico ya vienen en hora local
+  const fh = (s) => {
+    if (!s) return '—';
+    s = String(s);
+    if (!/(Z|[+-]\d\d:?\d\d)$/.test(s)) return s.replace('T', ' ').slice(0, 16);
+    const d = new Date(s);
+    return `${DAC.iso(d)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  };
   const titulo = (s) => (s || '').toLowerCase().replace(/(^|\s)\S/g, (c) => c.toUpperCase());
   const mesTxt = (p) => `${MESES[Number(p.slice(5, 7)) - 1]} ${p.slice(0, 4)}`;
   const rangoMes = (p) => { const [y, m] = p.split('-').map(Number); return [`${p}-01`, DAC.iso(new Date(y, m, 0))]; };
@@ -147,7 +154,7 @@
     return `
       <div class="cabeza">
         <div><h2>Departamento de Análisis · ${mesTxt(S.mes)}</h2>
-          <div class="muted small">${notaHoy(M)} Última actualización: <b>${ult ? fh(String(ult).replace(/([+-]\d\d:\d\d|Z)$/, '')) : '—'}</b></div></div>
+          <div class="muted small">${notaHoy(M)} Última actualización: <b>${fh(ult)}</b></div></div>
         <div>${filtros({ producto: false, tipo: false, extra: '<button class="btn" data-act="actualizar">⟳ Actualizar</button>' })}
           <div class="estado-act muted" id="estadoAct" style="margin-top:-8px"></div></div>
       </div>
