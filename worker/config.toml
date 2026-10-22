@@ -14,6 +14,6 @@ historico = "Historico de solicitudes Tiempo.sql"
 
 [supabase]
 url = "https://lzgteejsjxrbadsqlpnd.supabase.co"
-anon_key = ""            # misma clave pública que public/config.js
+anon_key = "sb_publishable_3v2gGe5N9Oh1eW-9ywMb1g_3Buo8af8"            # misma clave pública que public/config.js
 usuario = "sistema"      # usuario de carga (rol sistema); su contraseña va en el Administrador de credenciales
 servicio_credenciales = "tiempos_dac_supabase"
