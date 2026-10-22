@@ -1,0 +1,19 @@
+# Configuración del proceso de actualización de Tiempos DAC (sin secretos).
+# Las credenciales SQL son las mismas de Loan Tape / Módulo de Garantías (Administrador de credenciales de Windows).
+
+[servidor]
+server = 'SRV-TORTUGUERO\DATAWAREHOUSE'   # comillas simples: la barra invertida se toma literal
+database = "GENESIS_REGIONAL"
+driver = "ODBC Driver 18 for SQL Server"   # si no está instalado se usa el más nuevo disponible
+servicio_credenciales = "modulo_garantias_sql"
+
+[consultas]
+# Se leen tal cual desde la carpeta del proyecto; no se modifican.
+bitacora = "Bitacora Tiempo.sql"
+historico = "Historico de solicitudes Tiempo.sql"
+
+[supabase]
+url = "https://lzgteejsjxrbadsqlpnd.supabase.co"
+anon_key = ""            # misma clave pública que public/config.js
+usuario = "sistema"      # usuario de carga (rol sistema); su contraseña va en el Administrador de credenciales
+servicio_credenciales = "tiempos_dac_supabase"
