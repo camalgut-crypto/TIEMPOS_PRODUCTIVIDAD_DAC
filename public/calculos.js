@@ -131,11 +131,12 @@
     const solPorId = new Map((D.solicitudes || []).map((s) => [s.solicitud, s]));
 
     // Tiempo de la solicitud = último tramo de análisis cerrado; el caso queda a ese analista
-    // El caso queda a quien dio la última decisión (aprobado/rechazado por analista, TUD o preaprobado condicionado).
+    // El caso queda a quien dio la última decisión (aprobado/rechazado por analista, rechazado por recepción o resolución, TUD o preaprobado condicionado).
     // Si esa decisión cierra un reprocesamiento, queda al analista que dejó la solicitud en preaprobado condicionado.
     // El tiempo de la solicitud es el del tramo de ese analista.
-    const esDecision = (e) => !!e && (e === 'APROBADO POR ANALISTA' || e === 'RECHAZADO POR ANALISTA'
-      || e === 'PREAPROBADO CONDICIONADO' || e.startsWith('TUD'));
+    const DECISIONES = ['APROBADO POR ANALISTA', 'RECHAZADO POR ANALISTA', 'RECHAZADO POR RECEPCION', 'RECHAZADO RESOLUCION',
+      'PREAPROBADO CONDICIONADO'];
+    const esDecision = (e) => !!e && (DECISIONES.includes(e) || e.startsWith('TUD'));
     function global(s) {
       const tr = (tramosPorSol.get(s.solicitud) || []).filter((t) => t.fin);
       const analisis = tr.filter((t) => t.tipo === 'analisis');

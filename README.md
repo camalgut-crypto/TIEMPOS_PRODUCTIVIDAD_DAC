@@ -19,11 +19,13 @@ Aplicación web en línea (GitHub Pages + Supabase): se abre desde cualquier com
 ## Reglas de cálculo
 
 - **Universo DAC**: solicitudes que pasaron por POR ASIGNAR A ANALISTA. Se cuentan en el mes en que ingresaron por primera vez.
-- **Tramo del analista**: empieza en ANALISTA ASIGNADO y termina en APROBADO/RECHAZADO POR ANALISTA, cualquier TUD, PRE ANALISIS o PREAPROBADO CONDICIONADO. No cuentan, como en el Excel, PENDIENTES, VERIFICADOR MOTORIZADO, REVISION APROBADOR, COMITE CREDITO, DEVUELTO GERENCIA y los estados de resolución (configurable en Administración). El tiempo se mide en horas hábiles: L-V 8:00–18:00 y sábado 8:00–14:00, más los horarios especiales por fecha (por ejemplo, días que el DAC cierra a las 8:00 pm).
+- **Tramo del analista**: empieza en ANALISTA ASIGNADO y termina en APROBADO/RECHAZADO POR ANALISTA, RECHAZADO POR RECEPCION, RECHAZADO RESOLUCION, cualquier TUD, PRE ANALISIS o PREAPROBADO CONDICIONADO. Es del analista que lo trabaja (primer EN ANALISIS o la decisión), no de quien asignó. No cuentan, como en el Excel, PENDIENTES, VERIFICADOR MOTORIZADO, REVISION APROBADOR, COMITE CREDITO, DEVUELTO GERENCIA y los estados de resolución (configurable en Administración).
+- **Dueño del caso**: quien dio la última decisión; si cierra un preaprobado condicionado, el analista que lo dejó en preaprobado. Sin decisión, el último analista que la tuvo. Un TUD registrado por el promotor es del analista del tramo.
+- **Productividad del departamento**: productividad de cada producto ponderada por su peso en solicitudes. El tiempo se mide en horas hábiles: L-V 8:00–18:00 y sábado 8:00–14:00, más los horarios especiales por fecha (por ejemplo, días que el DAC cierra a las 8:00 pm).
 - **Corte de mes**: cada solicitud pertenece al mes en que ingresó al DAC y se mide solo hasta el cierre de ese mes; lo que siga abierto se cierra en el corte. Del día 1 al 5 de cada mes el proceso vuelve a leer el mes anterior para cerrarlo.
 - **Preaprobado condicionado**: desde PREAPROBADO CONDICIONADO hasta la decisión del analista que la retoma, a quien se le asigna el reprocesamiento.
 - **Duración total de la solicitud**: desde su creación hasta la última decisión del analista (aprobado/rechazado por analista o TUD).
-- **Tiempo de la solicitud**: el del último tramo de análisis; el caso queda a ese analista.
+- **Tiempo de la solicitud**: el del tramo del dueño del caso.
 - **Producto**: PYMES, MOTO; el resto es PERS. **Reestructura**: Monto Colocado 0 o 1 (cuenta para productividad, no para tiempos).
 - **Productividad**: solicitudes ÷ días hábiles ÷ analistas (por disponibilidad, descontando vacaciones). Para el analista: solicitudes en que intervino ÷ sus días disponibles (más eventos especiales).
 - **Días hábiles**: lunes a viernes 1, sábado 0.5, domingo 0, feriados 0 (si caen domingo se reponen el lunes).
