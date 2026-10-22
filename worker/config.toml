@@ -12,6 +12,11 @@ servicio_credenciales = "modulo_garantias_sql"
 bitacora = "Bitacora Tiempo.sql"
 historico = "Historico de solicitudes Tiempo.sql"
 
+[consultas_historico]
+# Carga única de meses anteriores (actualizar.py --historico)
+bitacora = "Bitacora Tiempo anual.sql"
+historico = "Historico de solicitudes Tiempo Anual.sql"
+
 [supabase]
 url = "https://lzgteejsjxrbadsqlpnd.supabase.co"
 anon_key = "sb_publishable_3v2gGe5N9Oh1eW-9ywMb1g_3Buo8af8"            # misma clave pública que public/config.js

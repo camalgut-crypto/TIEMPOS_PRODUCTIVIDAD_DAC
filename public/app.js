@@ -9,7 +9,7 @@
   const DSEM = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
   const COLOR = { PERS: 'var(--s-pers)', PYMES: 'var(--s-pymes)', MOTO: 'var(--s-moto)' };
   const ROLES = { admin: 'Administrador', jefe: 'Jefe DAC', analista: 'Analista', gerente: 'Gerente DAC' };
-  const INICIO = '2026-10'; // se guarda información desde octubre 2026
+  const INICIO = '2026-01'; // información cargada desde enero 2026 (histórico) y en línea desde octubre
   const TABS = [
     ['dashboard', 'Dashboard', ['admin', 'jefe', 'gerente', 'analista']],
     ['tiempos', 'Tiempos por analista', ['admin', 'jefe', 'analista']],
@@ -349,7 +349,7 @@
     const selAnio = `<label>Año<select data-f="anio">${anios.sort().map((y) => `<option ${y === S.anio ? 'selected' : ''}>${y}</option>`).join('')}</select></label>`;
     const cabeza = `<div class="filtros"><label>Agrupar${seg}</label>${selAnio}
       <label>Producto<select data-f="producto"><option value="">Todos</option>${DAC.PRODUCTOS.map((p) => `<option ${p === S.producto ? 'selected' : ''}>${p}</option>`).join('')}</select></label></div>`;
-    if (!filas.length) return cabeza + '<div class="card vacio">La información se acumula desde octubre 2026.</div>';
+    if (!filas.length) return cabeza + '<div class="card vacio">La información está disponible desde enero 2026.</div>';
     const serie = (nom, color, f) => ({ nombre: nom, color, puntos: filas.map((r) => ({ x: r.nom, y: f(r) })) });
     const an = C.analistas.filter((a) => !yo || a.nombre === yo);
     const prodA = filas.map((r) => new Map(r.M.porAnalista.map((a) => [a.nombre, a])));

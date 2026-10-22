@@ -4,6 +4,7 @@ Uso:
   actualizar.py --una-vez      ejecuta una actualización
   actualizar.py --escuchar     queda atendiendo el botón "Actualizar" de la app (y actualiza solo cada N minutos)
   actualizar.py --configurar   guarda la contraseña del usuario de sistema en el Administrador de credenciales
+  actualizar.py --historico    carga una sola vez los meses anteriores (consultas "anual"), sin tocar usuarios
   actualizar.py --local        genera public/local/datos.json para revisar la app sin Supabase
 """
 import argparse
@@ -40,9 +41,10 @@ def _registros(df: pd.DataFrame) -> list[dict]:
     return [{k: _json(v) for k, v in r.items()} for r in df.to_dict("records")]
 
 
-def procesar(cfg: dict, jornada: Jornada) -> tuple[list[dict], list[dict]]:
-    sql = {k: (RAIZ / v).read_text(encoding="utf-8-sig") for k, v in cfg["consultas"].items()}
-    if date.today().day <= DIAS_CIERRE:
+def procesar(cfg: dict, jornada: Jornada, historico: bool = False) -> tuple[list[dict], list[dict]]:
+    sql = {k: (RAIZ / v).read_text(encoding="utf-8-sig")
+           for k, v in cfg["consultas_historico" if historico else "consultas"].items()}
+    if not historico and date.today().day <= DIAS_CIERRE:
         # Las consultas traen lo creado desde el día 1 del mes; en memoria (sin tocar los archivos) se amplían
         # al mes anterior para que sus solicitudes queden cerradas al corte de fin de mes.
         sql = {k: v.replace("MONTH, 0", "MONTH, -1") for k, v in sql.items()}
@@ -51,6 +53,10 @@ def procesar(cfg: dict, jornada: Jornada) -> tuple[list[dict], list[dict]]:
     bit = consultar(cfg["servidor"], sql["bitacora"])
     his = consultar(cfg["servidor"], sql["historico"])
     logging.info("Consultas: bitácora %s filas, histórico %s filas (%.0f s)", len(bit), len(his), reloj.time() - t0)
+    if historico:
+        # La consulta anual viene ordenada de la más reciente a la más antigua; se invierte para que los cambios
+        # con la misma hora queden en el mismo orden que en la consulta mensual.
+        his = his.iloc[::-1].reset_index(drop=True)
     sol, tr = calcular(his, bit, jornada)
     sol["periodo"] = sol["ingreso_dac"].dt.strftime("%Y-%m")
     sol = sol[["solicitud", "periodo", "creada", "ingreso_dac", "tipo_credito", "producto", "reestructura",
@@ -89,6 +95,21 @@ def actualizar_nube(cfg: dict, sb, pedido: int | None = None):
         raise
 
 
+def cargar_historico(cfg: dict, sb, lote: int = 1000):
+    """Carga única de los meses anteriores (consultas *anual.sql), en lotes para no exceder el tamaño de la llamada."""
+    sols, trs = procesar(cfg, jornada_nube(sb), historico=True)
+    por_sol: dict[int, list[dict]] = {}
+    for t in trs:
+        por_sol.setdefault(t["solicitud"], []).append(t)
+    total = 0
+    for i in range(0, len(sols), lote):
+        parte = sols[i:i + lote]
+        total += sb.rpc("dac_cargar", {"p_solicitudes": parte,
+                                       "p_tramos": [t for s in parte for t in por_sol.get(s["solicitud"], [])]})
+        logging.info("Histórico: %s de %s solicitudes cargadas", min(i + lote, len(sols)), len(sols))
+    logging.info("Histórico cargado: %s solicitudes y %s tramos", len(sols), total)
+
+
 def escuchar(cfg: dict):
     from tiempos_dac.nube import Supabase
     ultima = 0.0
@@ -125,7 +146,7 @@ def local(cfg: dict):
 def main():
     ap = argparse.ArgumentParser()
     g = ap.add_mutually_exclusive_group(required=True)
-    for op in ("una-vez", "escuchar", "configurar", "local"):
+    for op in ("una-vez", "escuchar", "configurar", "local", "historico"):
         g.add_argument(f"--{op}", action="store_true")
     a = ap.parse_args()
     LOG.parent.mkdir(exist_ok=True)
@@ -138,6 +159,9 @@ def main():
         print("Guardada.")
     elif a.local:
         local(cfg)
+    elif a.historico:
+        from tiempos_dac.nube import Supabase
+        cargar_historico(cfg, Supabase(cfg["supabase"]))
     elif a.una_vez:
         from tiempos_dac.nube import Supabase
         actualizar_nube(cfg, Supabase(cfg["supabase"]))

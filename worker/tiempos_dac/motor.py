@@ -92,6 +92,16 @@ def _tramo(sol, tipo, analista, filas, i0, i1, fin_estado, jornada):
     }
 
 
+def _quien(filas: list[dict], ana: tuple[str, int], i1: int | None) -> str:
+    """Analista del tramo: quien lo trabaja (primer EN ANALISIS o la decisión), no quien asignó.
+    De enero a abril 2026 la jefatura registraba ANALISTA ASIGNADO y el analista hacía el análisis."""
+    fin = len(filas) if i1 is None else i1 + 1
+    for g in filas[ana[1] + 1:fin]:
+        if g["estado"] == EN_ANALISIS or g["estado"] in DECISION:
+            return g["usuario"]
+    return ana[0]
+
+
 def tramos_solicitud(sol: int, filas: list[dict], jornada: Jornada) -> list[dict]:
     tramos = []
     ana = None    # (analista, índice de inicio) del tramo de análisis abierto
@@ -103,7 +113,7 @@ def tramos_solicitud(sol: int, filas: list[dict], jornada: Jornada) -> list[dict
                 quien = next((g["usuario"] for g in filas[rep + 1:i] if g["estado"] == EN_ANALISIS), None)
                 tramos.append(_tramo(sol, "reproceso", quien, filas, rep, i, CORTE, jornada))
             if ana is not None:
-                tramos.append(_tramo(sol, "analisis", ana[0], filas, ana[1], i, CORTE, jornada))
+                tramos.append(_tramo(sol, "analisis", _quien(filas, ana, i), filas, ana[1], i, CORTE, jornada))
             return tramos
         if rep is not None and i > rep:
             if est in DECISION or es_tud(est) or est in (PRE_ANALISIS, PREAPROBADO, ASIGNADO, POR_ASIGNAR):
@@ -115,20 +125,20 @@ def tramos_solicitud(sol: int, filas: list[dict], jornada: Jornada) -> list[dict
                 rep = None
         if ana is not None:
             if est == ASIGNADO:
-                tramos.append(_tramo(sol, "analisis", ana[0], filas, ana[1], i, "REASIGNADA", jornada))
+                tramos.append(_tramo(sol, "analisis", _quien(filas, ana, i), filas, ana[1], i, "REASIGNADA", jornada))
                 ana = None
             elif est == POR_ASIGNAR:
-                tramos.append(_tramo(sol, "analisis", ana[0], filas, ana[1], i, "DEVUELTA A COLA", jornada))
+                tramos.append(_tramo(sol, "analisis", _quien(filas, ana, i), filas, ana[1], i, "DEVUELTA A COLA", jornada))
                 ana = None
             elif es_fin_analisis(est):
-                tramos.append(_tramo(sol, "analisis", ana[0], filas, ana[1], i, est, jornada))
+                tramos.append(_tramo(sol, "analisis", _quien(filas, ana, i), filas, ana[1], i, est, jornada))
                 ana = None
         if est == ASIGNADO:
             ana = (usr, i)
         if est == PREAPROBADO and rep is None:
             rep = i
     if ana is not None:
-        tramos.append(_tramo(sol, "analisis", ana[0], filas, ana[1], None, "EN CURSO", jornada))
+        tramos.append(_tramo(sol, "analisis", _quien(filas, ana, None), filas, ana[1], None, "EN CURSO", jornada))
     if rep is not None:
         quien = next((g["usuario"] for g in filas[rep + 1:] if g["estado"] == EN_ANALISIS), None)
         tramos.append(_tramo(sol, "reproceso", quien, filas, rep, None, "EN CURSO", jornada))

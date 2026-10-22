@@ -1,0 +1,7 @@
+SELECT *
+FROM [GENESIS_REGIONAL].[dwh].[V_BIT_REGIONAL_COLOCACION_new]
+WHERE IdPais = 2
+    AND Fecha_creacion >= DATEADD(
+        MONTH, -9,
+        DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1)
+    )
