@@ -72,7 +72,7 @@
         </div>
         <form id="flog">
           <h2>Ingresar</h2>
-          <p class="muted small">Escriba su usuario tal como se lo entregaron (por ejemplo: Hilcia Paola).</p>
+          <p class="muted small">Escriba su usuario tal como se lo entregaron (su nombre completo, por ejemplo: Hilcia Paola Morales Mendez).</p>
           <label for="lu">Usuario</label><input id="lu" autocomplete="username" required>
           <label for="lp">Contraseña</label><input id="lp" type="password" autocomplete="current-password" required>
           <p class="small" style="color:var(--rojo);min-height:18px">${esc(msg)}</p>

@@ -10,8 +10,8 @@ create extension if not exists pgcrypto with schema extensions;
 -- Roles: admin (todo), jefe (todo), analista (sus vistas), gerente (solo dashboard), sistema (proceso de carga)
 create table if not exists public.dac_perfiles (
   id uuid primary key references auth.users(id) on delete cascade,
-  usuario text not null unique,          -- forma normalizada del nombre: "hilcia.paola"
-  nombre text not null,                  -- como se muestra: "Hilcia Paola"
+  usuario text not null unique,          -- forma normalizada del nombre: "hilcia.paola.morales.mendez"
+  nombre text not null,                  -- como se muestra: "Hilcia Paola Morales Mendez"
   rol text not null check (rol in ('admin','jefe','analista','gerente','sistema')),
   analista text,                         -- nombre del analista tal como aparece en el sistema (rol analista)
   activo boolean not null default true,
@@ -170,7 +170,7 @@ create policy atender on public.dac_actualizaciones for update to authenticated
 -- ---------- Carga de datos: dac_cargar y dac_cargar_extra están al final (cambios del 23-oct) ----------
 
 -- ---------- Usuarios (sin correo real) ----------
--- "Hilcia Paola" ingresa escribiendo su nombre; internamente es hilcia.paola@tiemposdac.local
+-- "Hilcia Paola Morales Mendez" ingresa escribiendo su nombre; internamente es hilcia.paola.morales.mendez@tiemposdac.local
 create or replace function public.dac_crear_usuario(p_usuario text, p_nombre text, p_rol text, p_password text, p_analista text default null)
 returns uuid language plpgsql security definer set search_path = public, extensions as $$
 declare uid uuid; correo text := lower(trim(p_usuario)) || '@tiemposdac.local';

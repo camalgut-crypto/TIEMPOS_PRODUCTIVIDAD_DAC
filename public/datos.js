@@ -84,9 +84,9 @@
   async function usuariosLocales() {
     const base = [
       { nombre: 'Carlos Manuel Alvarez Gutierrez', rol: 'admin' },
-      { nombre: 'Hilcia Paola', rol: 'jefe' },
-      { nombre: 'Katherine Guiselle', rol: 'jefe' },
-      { nombre: 'Karen Arana', rol: 'gerente' },
+      { nombre: 'Hilcia Paola Morales Mendez', rol: 'jefe' },
+      { nombre: 'Katherine Gissell Mora Garcia', rol: 'jefe' },
+      { nombre: 'Karen Maritza Arana Melendez', rol: 'gerente' },
     ];
     const an = ls.get('dac_analistas', null) || (await analistasSemilla());
     return ls.get('usuarios', null) || base.concat(an.map((a) => ({ nombre: titulo(a.nombre), rol: a.nombre.startsWith('LILIANA') ? 'reproceso' : 'analista', analista: a.nombre })))

@@ -15,8 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from tiempos_dac.conexion import RAIZ, leer_config  # noqa: E402
 
 CLAVE = "12345678"
-FIJOS = [("Carlos Manuel Alvarez Gutierrez", "admin"), ("Hilcia Paola", "jefe"),
-         ("Katherine Guiselle", "jefe"), ("Karen Arana", "gerente")]
+FIJOS = [("Carlos Manuel Alvarez Gutierrez", "admin"), ("Hilcia Paola Morales Mendez", "jefe"),
+         ("Katherine Gissell Mora Garcia", "jefe"), ("Karen Maritza Arana Melendez", "gerente")]
 
 
 def slug(s: str) -> str:
