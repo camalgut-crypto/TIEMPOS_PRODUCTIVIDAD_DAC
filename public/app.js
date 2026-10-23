@@ -26,7 +26,7 @@
   ];
 
   const S = { perfil: null, D: null, C: null, tab: 'dashboard', mes: null, producto: '', tipo: '', vista: 'analista',
-    gran: 'mes', anio: null, calMes: null, buscar: '', pedido: null, dgran: 'mes', dper: null, cap: null,
+    dist: 'pct', gran: 'mes', anio: null, calMes: null, buscar: '', pedido: null, dgran: 'mes', dper: null, cap: null,
     camino: 'todas', cfin: 'final', cmed: null };
   const MES3 = MESES.map((m) => m.slice(0, 3));
 
@@ -120,14 +120,14 @@
   function pintar() {
     const tabs = TABS.filter((t) => t[2].includes(S.perfil.rol));
     app.innerHTML = `
-      <header class="top">
+      <div class="barra-fija"><header class="top">
         <img src="img/logo_claro.png" alt="Instacredit">
         <div class="tit">Tiempos <span>DAC</span></div>
         <div class="yo"><span>${esc(S.perfil.nombre)}</span><span class="chip">${ROLES[S.perfil.rol]}</span>
           <button class="btn sec mini" data-act="clave">Cambiar contraseña</button>
           <button class="btn sec mini" data-act="salir">Salir</button></div>
       </header>
-      ${tabs.length > 1 ? `<nav class="tabs">${tabs.map((t) => `<button data-tab="${t[0]}" class="${t[0] === S.tab ? 'on' : ''}">${t[1]}</button>`).join('')}</nav>` : ''}
+      ${tabs.length > 1 ? `<nav class="tabs">${tabs.map((t) => `<button data-tab="${t[0]}" class="${t[0] === S.tab ? 'on' : ''}">${t[1]}</button>`).join('')}</nav>` : ''}</div>
       <main id="main"></main><div id="modal"></div>`;
     vista();
   }
@@ -397,8 +397,9 @@
   function tablaTiempos(grupos, etiqueta = 'Analista', tituloLista = '') {
     const total = DAC.resumenTiempos(grupos.flatMap((g) => g.valores), metas());
     const fila = (nom, R, filas, cls = '') => `<tr class="${cls}"><td>${nom}</td><td class="num">${conLista(R.n, `${tituloLista} · ${nom.replace(/<[^>]+>/g, '')}`, filas)}</td><td class="num">${dur(R.prom)}</td><td class="num">${dur(R.mediana)}</td><td class="num"><b>${pct(R.enMeta)}</b></td>
-      ${[...R.dist.values()].map((c) => { const v = R.n ? c / R.n : 0; return `<td class="heat" style="${heat(v)}" data-tip="${c} de ${R.n}">${v ? Math.round(100 * v) + '%' : '·'}</td>`; }).join('')}</tr>`;
-    return `<div class="tabla"><table><thead><tr><th>${etiqueta}</th><th class="num">Casos</th><th class="num">Promedio</th><th class="num">Mediana</th><th class="num" data-tip="${metaTxt()} (según el producto de la solicitud)">En meta</th>
+      ${[...R.dist.values()].map((c) => { const v = R.n ? c / R.n : 0; return `<td class="heat" style="${heat(v)}" data-tip="${c} de ${R.n} (${pct(v)})">${!v ? '·' : S.dist === 'num' ? n0(c) : Math.round(100 * v) + '%'}</td>`; }).join('')}</tr>`;
+    const modo = `<div class="dist-modo"><span class="muted small">Rangos en</span><div class="seg">${[['num', '# solicitudes'], ['pct', '%']].map(([k, t]) => `<button data-set="dist:${k}" class="${S.dist === k ? 'on' : ''}">${t}</button>`).join('')}</div></div>`;
+    return `${modo}<div class="tabla"><table><thead><tr><th>${etiqueta}</th><th class="num">Casos</th><th class="num">Promedio</th><th class="num">Mediana</th><th class="num" data-tip="${metaTxt()} (según el producto de la solicitud)">En meta</th>
       ${[...DAC.RANGOS, Infinity].map((r) => `<th class="num">${rangoTxt(r)}</th>`).join('')}</tr></thead><tbody>
       ${grupos.map((g) => fila(g.nombre, DAC.resumenTiempos(g.valores, metas()), g.filas)).join('')}
       ${grupos.length > 1 ? fila('Total', total, grupos.flatMap((g) => g.filas || []), 'total') : ''}</tbody></table></div>`;
@@ -690,14 +691,28 @@
     const C = S.C, M = DAC.metricas(C, S.D, d, h, filtroDatos()), yo = soloYo();
     const filas = M.porAnalista.filter((a) => !yo || a.nombre === yo).sort((a, b) => (b.prod || 0) - (a.prod || 0));
     const ausentes = (nom) => (S.D.ausencias || []).filter((a) => a.analista === nom && a.hasta >= d && a.desde <= h).length;
+    // Solicitudes de cada analista según cómo le llegaron: por su análisis (con o sin preaprobado) o por preaprobado (reproceso)
+    const conPre = new Set(S.D.tramos.filter((t) => t.tipo === 'reproceso').map((t) => t.solicitud));
+    const pasoPre = (id) => { const s = C.solPorId.get(id); return !!(s && s.ciclo && Object.keys(s.ciclo.est || {}).some((k) => k.startsWith('PRE ANALISIS|'))); };
+    const filaSolId = (id) => { const s = C.solPorId.get(id) || {}; return { solicitud: id, producto: s.producto, tipo_credito: s.tipo_credito, inicio: s.ingreso_dac, fin_estado: s.decision, estado_hoy: s.ultimo_estado || s.estado_actual, metaSeg: null }; };
+    const cel = (a, ids, txt, tip = '') => `<td class="num"${tip ? ` data-tip="${tip}"` : ''}>${conLista(ids.length, `${titulo(a.nombre)} · ${txt}`, ids.map(filaSolId))}</td>`;
+    const grupos = (a) => {
+      const an = [...a.ids.analisis], re = [...a.ids.reproceso];
+      const sinPre = an.filter((id) => !conPre.has(id)), conPreA = an.filter((id) => conPre.has(id)), soloRe = re.filter((id) => !a.ids.analisis.has(id));
+      return { an, re, sinPre, conPreA, soloRe, sinPreConPA: sinPre.filter(pasoPre).length };
+    };
 
     return `${filtros()}
       <div class="card"><h3>Productividad por analista · ${mesTxt(S.mes)}</h3>
-        <p class="muted small">${notaHoy(M)} Cada solicitud cuenta para cada analista que intervino en ella (aunque sea de otro producto). Días disponibles = días hábiles − vacaciones/permisos + eventos especiales asignados.</p>
-        <div class="tabla"><table><thead><tr><th>Analista</th><th>Producto</th><th class="num">Solicitudes</th><th class="num">De su producto</th><th class="num">De otros productos</th><th class="num">Con reproceso</th><th class="num">Días disponibles</th><th class="num">Productividad</th></tr></thead><tbody>
-        ${filas.map((a) => `<tr><td>${esc(titulo(a.nombre))}</td><td>${prodTag(a.producto)}</td><td class="num">${n0(a.n)}</td><td class="num">${n0(a.propio)}</td><td class="num">${n0(a.otros)}</td><td class="num">${n0(a.reproceso)}</td>
-          <td class="num">${n2(a.disp)}${ausentes(a.nombre) ? ' <span class="muted small" data-tip="Tiene vacaciones o permisos en el mes">✱</span>' : ''}</td><td class="num"><b>${n2(a.prod)}</b></td></tr>`).join('')}
-        ${yo ? '' : `<tr class="total"><td>Departamento</td><td></td><td class="num">${n0(M.depto.n)}</td><td colspan="3" class="muted small">solicitudes únicas (una solicitud con varios analistas cuenta una vez)</td><td class="num">${n2(M.depto.disp)}</td><td class="num">${n2(M.depto.prod)}</td></tr>`}
+        <p class="muted small">${notaHoy(M)} Cada solicitud cuenta para cada analista que intervino en ella (aunque sea de otro producto). Días disponibles = días hábiles − vacaciones/permisos + eventos especiales asignados.
+          <b>Por su análisis</b> + <b>Solo por preaprobado</b> = Solicitudes. Clic en una cantidad para ver las solicitudes.</p>
+        <div class="tabla"><table><thead><tr><th>Analista</th><th>Producto</th><th class="num">Solicitudes</th><th class="num">De su producto</th><th class="num">De otros productos</th>
+          <th class="num" data-tip="Solicitudes que analizó (tramo de análisis)">Por su análisis</th><th class="num" data-tip="Las analizó y nunca pasaron por preaprobado condicionado">· sin preaprobado</th><th class="num" data-tip="Las analizó y después pasaron por preaprobado condicionado">· con preaprobado</th>
+          <th class="num" data-tip="Le llegaron solo por el reprocesamiento del preaprobado condicionado (no las analizó)">Solo por preaprobado</th><th class="num">Días disponibles</th><th class="num">Productividad</th></tr></thead><tbody>
+        ${filas.map((a) => { const g = grupos(a); return `<tr><td>${esc(titulo(a.nombre))}</td><td>${prodTag(a.producto)}</td><td class="num">${n0(a.n)}</td><td class="num">${n0(a.propio)}</td><td class="num">${n0(a.otros)}</td>
+          ${cel(a, g.an, 'por su análisis')}${cel(a, g.sinPre, 'su análisis sin preaprobado', `${g.sinPreConPA} de ${g.sinPre.length} pasaron por PRE ANALISIS`)}${cel(a, g.conPreA, 'su análisis con preaprobado')}${cel(a, g.soloRe, 'solo por preaprobado (reproceso)')}
+          <td class="num">${n2(a.disp)}${ausentes(a.nombre) ? ' <span class="muted small" data-tip="Tiene vacaciones o permisos en el mes">✱</span>' : ''}</td><td class="num"><b>${n2(a.prod)}</b></td></tr>`; }).join('')}
+        ${yo ? '' : `<tr class="total"><td>Departamento</td><td></td><td class="num">${n0(M.depto.n)}</td><td colspan="6" class="muted small">solicitudes únicas (una solicitud con varios analistas cuenta una vez)</td><td class="num">${n2(M.depto.disp)}</td><td class="num">${n2(M.depto.prod)}</td></tr>`}
         </tbody></table></div>
         ${!yo && M.sinConfigurar.length ? `<div class="nota alerta">Intervinieron usuarios que no son analistas: ${M.sinConfigurar.map((x) => `${esc(titulo(x.nombre))} (${x.n})`).join(', ')}. Sus solicitudes y tiempos sí cuentan para el departamento, pero no tienen productividad propia ni suman al número de analistas.</div>` : ''}
       </div>

@@ -206,17 +206,17 @@
       if (!t.analista || !enRango(t.inicio)) continue;
       const s = C.solPorId.get(t.solicitud);
       if (!s || !pasa(s)) continue;
-      if (!part.has(t.analista)) part.set(t.analista, { sols: new Set(), propio: new Set(), otros: new Set(), reproceso: new Set() });
+      if (!part.has(t.analista)) part.set(t.analista, { sols: new Set(), propio: new Set(), otros: new Set(), reproceso: new Set(), analisis: new Set() });
       const p = part.get(t.analista);
       p.sols.add(s.solicitud);
       (s.producto === C.productoDe.get(t.analista) ? p.propio : p.otros).add(s.solicitud);
-      if (t.tipo === 'reproceso') p.reproceso.add(s.solicitud);
+      (t.tipo === 'reproceso' ? p.reproceso : p.analisis).add(s.solicitud);
     }
     const porAnalista = C.analistas.map((a) => {
-      const p = part.get(a.nombre) || { sols: new Set(), propio: new Set(), otros: new Set(), reproceso: new Set() };
+      const p = part.get(a.nombre) || { sols: new Set(), propio: new Set(), otros: new Set(), reproceso: new Set(), analisis: new Set() };
       const disp = C.disponibilidad(a.nombre, desde, hasta, true);
       return { nombre: a.nombre, producto: a.producto, n: p.sols.size, propio: p.propio.size, otros: p.otros.size,
-        reproceso: p.reproceso.size, disp, prod: disp ? p.sols.size / disp : null };
+        reproceso: p.reproceso.size, ids: { analisis: p.analisis, reproceso: p.reproceso }, disp, prod: disp ? p.sols.size / disp : null };
     });
     const sinConfigurar = [...part.keys()].filter((n) => !C.esAnalista.has(n))
       .map((n) => ({ nombre: n, n: part.get(n).sols.size }));

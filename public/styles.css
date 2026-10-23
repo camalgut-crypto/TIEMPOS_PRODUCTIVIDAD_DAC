@@ -150,6 +150,8 @@ tr.sel td { background: #FFE9D6 !important; font-weight: 700; }
 .chip-filtro { margin-top: 6px; display: inline-flex; align-items: center; gap: 8px; background: #FFE9D6; color: var(--navy); border-radius: 8px; padding: 4px 6px 4px 10px; font-size: 13px; }
 
 /* Barra de pestañas fija al bajar en la página */
-nav.tabs { position: sticky; top: 0; z-index: 30; box-shadow: 0 2px 8px rgba(6,37,91,.06); }
+.barra-fija { position: sticky; top: 0; z-index: 30; box-shadow: 0 2px 8px rgba(6,37,91,.10); }
 .hb .nom.sel { font-weight: 800; color: var(--navy); }
 .hb .bar.sel { box-shadow: 0 0 0 2px var(--naranja); }
+.dist-modo { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin: 6px 0; }
+.dist-modo .seg button { padding: 4px 10px; font-size: 12px; }
