@@ -122,3 +122,15 @@ td.heat { text-align: center; font-variant-numeric: tabular-nums; }
 .estado-act { font-size: 12px; }
 @media (max-width: 900px) { .g2, .g3 { grid-template-columns: 1fr; } main { padding: 14px 16px 40px; } }
 tr.total td.heat { color: inherit !important; }
+
+/* Cantidades que abren el detalle, ventana de detalle y barras de horas pico */
+.lnk { border: 0; background: none; padding: 0; color: var(--navy); font-weight: 700; text-decoration: underline dotted; cursor: pointer; font-variant-numeric: tabular-nums; }
+.lnk:hover { color: var(--verde); }
+tr.total .lnk { color: inherit; }
+.velo { position: fixed; inset: 0; background: rgba(6,37,91,.35); z-index: 40; display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow-y: auto; }
+.ventana { width: min(1200px, 100%); max-height: calc(100vh - 80px); display: flex; flex-direction: column; }
+.ventana .tabla { overflow: auto; }
+.bar1 { height: 12px; background: var(--fondo); border-radius: 0 4px 4px 0; position: relative; }
+.bar1 b { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 0 4px 4px 0; }
+table.compacta td { padding: 3px 10px; }
+.kpi .lnk { color: inherit; text-decoration-color: rgba(255,255,255,.6); }

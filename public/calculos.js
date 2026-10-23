@@ -3,6 +3,7 @@
 (function () {
   const PRODUCTOS = ['PERS', 'PYMES', 'MOTO'];
   const RANGOS = [1, 2, 3, 4, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 60, 90, 240];
+  const METAS = { PERS: 20, MOTO: 40, PYMES: 50 }; // minutos; se cambian en Administración
 
   const slug = (s) => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
     .trim().replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '');
@@ -49,6 +50,7 @@
   function contexto(D, ahora = new Date()) {
     const cfg = Object.assign({ modo_hoy: 'proporcional', modo_tiempo: 'jornada', estados_excluidos: ["PENDIENTES", "VERIFICADOR MOTORIZADO", "REVISION APROBADOR", "COMITE CREDITO", "DEVUELTO GERENCIA", "RESOLUCION APROBADA", "RECHAZADO RESOLUCION", "RECHAZADO POR RECEPCION", "RECHAZADO POR MOTOR", "ENVIADO", "POR ASIGNAR A ANALISTA"],
       meta_minutos: 30, jornada: { lv: ['08:00', '18:00'], sab: ['08:00', '14:00'] } }, D.config || {});
+    cfg.metas = { ...METAS, ...(cfg.metas || {}) };
     const feriados = new Map((D.feriados || []).map((f) => [f.fecha, Number(f.valor)]));
     const especiales = new Map((D.horarios || []).map((x) => [x.fecha, [x.inicio.slice(0, 5), x.fin.slice(0, 5)]]));
     // Horario hábil de un día: el especial de esa fecha o el normal (L-V / sábado)
@@ -116,10 +118,12 @@
     // ---------- Tiempos ----------
     const excl = new Set(cfg.estados_excluidos || []);
     const col = cfg.modo_tiempo === 'jornada' ? 1 : 0;
+    // Reprocesamiento (preaprobado condicionado): solo el tiempo EN ANALISIS; mientras la solicitud está en
+    // PREAPROBADO CONDICIONADO (esperando al promotor) el tiempo se detiene (indicado por el usuario 23-oct)
     const segundosTramo = (t) => {
       if (!t.fin || !t.estados) return null;
       let s = 0;
-      for (const [e, v] of Object.entries(t.estados)) if (!excl.has(e)) s += v[col];
+      for (const [e, v] of Object.entries(t.estados)) if (t.tipo === 'reproceso' ? e === 'EN ANALISIS' : !excl.has(e)) s += v[col];
       return s;
     };
     const tramosPorSol = new Map();
@@ -129,6 +133,17 @@
     }
     for (const l of tramosPorSol.values()) l.sort((a, b) => a.n - b.n);
     const solPorId = new Map((D.solicitudes || []).map((s) => [s.solicitud, s]));
+    // Valores para medir contra la meta del producto de la solicitud: {s: segundos, p: producto}
+    const valorTramo = (t) => ({ s: segundosTramo(t), p: (solPorId.get(t.solicitud) || {}).producto, t });
+    // Reprocesamiento de una solicitud: todos sus tramos de preaprobado condicionado como un solo caso
+    function reprocesoDe(sol) {
+      const tr = (tramosPorSol.get(sol) || []).filter((t) => t.tipo === 'reproceso');
+      if (!tr.length) return null;
+      const u = tr[tr.length - 1], abierto = tr.some((t) => !t.fin);
+      const s = tr.reduce((a, t) => a + (segundosTramo(t) || 0), 0);
+      return { solicitud: sol, analista: u.analista, s, p: (solPorId.get(sol) || {}).producto, tramos: tr, inicio: tr[0].inicio,
+        fin: abierto ? null : u.fin, fin_estado: abierto ? 'EN CURSO' : u.fin_estado, abierto };
+    }
 
     // Tiempo de la solicitud = último tramo de análisis cerrado; el caso queda a ese analista
     // El caso queda a quien dio la última decisión (aprobado/rechazado por analista, rechazado por recepción o resolución, TUD o preaprobado condicionado).
@@ -144,11 +159,19 @@
       let u = dec[dec.length - 1];
       if (u && u.tipo === 'reproceso') u = analisis.filter((t) => t.fin <= u.inicio).pop();
       if (!u) u = analisis[analisis.length - 1]; // sin decisión: último tramo de análisis
-      return u ? { analista: u.analista, segundos: segundosTramo(u), tramo: u } : null;
+      return u ? { analista: u.analista, segundos: segundosTramo(u), tramo: u, s: segundosTramo(u), p: s.producto, sol: s } : null;
     }
+    // Horas hábiles de jornada de un día (para la capacidad instalada)
+    const horasDia = (f) => {
+      if (feriados.has(f) && !feriados.get(f)) return 0;
+      const h = horario(f);
+      if (!h) return 0;
+      const [a, b] = h.map(minutosHHMM);
+      return ((b - a) / 60) * (feriados.has(f) ? feriados.get(f) : 1);
+    };
 
     return { cfg, hoy, ahora, horario, especiales, analistas, esAnalista, productoDe, valorDia, valorTranscurrido, fraccionHoy, disponibilidad,
-      diasHabiles, diasHabilesTotales, segundosTramo, tramosPorSol, solPorId, global };
+      diasHabiles, diasHabilesTotales, segundosTramo, tramosPorSol, solPorId, global, valorTramo, horasDia, reprocesoDe };
   }
 
   // ---------- Métricas de un período ----------
@@ -205,14 +228,35 @@
     for (const r of RANGOS) if (m <= r) return r;
     return Infinity;
   }
-  function resumenTiempos(lista, meta) {
-    const v = lista.filter((x) => x != null).sort((a, b) => a - b);
+  // lista: segundos o {s, p} (p = producto, para medir contra su meta). metas: minutos o {PERS, PYMES, MOTO}
+  function resumenTiempos(lista, metas) {
+    const it = lista.map((x) => (x == null || typeof x === 'number' ? { s: x } : x)).filter((x) => x.s != null).sort((a, b) => a.s - b.s);
+    const v = it.map((x) => x.s);
     const n = v.length;
+    const lim = (x) => (typeof metas === 'number' ? metas : (metas[x.p] ?? 30)) * 60;
     const dist = new Map([...RANGOS, Infinity].map((r) => [r, 0]));
     for (const s of v) dist.set(rango(s), dist.get(rango(s)) + 1);
     return { n, prom: n ? v.reduce((a, b) => a + b, 0) / n : null, mediana: n ? v[Math.floor((n - 1) / 2)] : null,
-      enMeta: n ? v.filter((s) => s <= meta * 60).length / n : null, dist };
+      enMeta: n ? it.filter((x) => x.s <= lim(x)).length / n : null, dist };
   }
+  // Casos de reprocesamiento cerrados que empezaron en el período (un caso por solicitud)
+  function reprocesos(C, D, desde, hasta, filtro = {}) {
+    const ids = new Set();
+    for (const t of D.tramos) if (t.tipo === 'reproceso') ids.add(t.solicitud);
+    const out = [];
+    for (const id of ids) {
+      const s = C.solPorId.get(id);
+      if (!s || s.reestructura || (filtro.producto && s.producto !== filtro.producto) || (filtro.tipo && s.tipo_credito !== filtro.tipo)) continue;
+      const r = C.reprocesoDe(id);
+      if (!r || r.abierto || r.inicio.slice(0, 10) < desde || r.inicio.slice(0, 10) > hasta) continue;
+      out.push(r);
+    }
+    return out;
+  }
+  // Universo DAC: una solicitud que se creó en un mes y entró al DAC en el siguiente (creada el 31, entra el 1) no cuenta como ingreso
+  const mismoMes = (s) => !s.creada || s.creada.slice(0, 7) === s.ingreso_dac.slice(0, 7);
+  // Semana del mes (W1 = del día 1 al primer domingo)
+  const semanaMes = (f) => { const d = fecha(f), off = (new Date(d.getFullYear(), d.getMonth(), 1).getDay() + 6) % 7; return Math.floor((d.getDate() - 1 + off) / 7) + 1; };
   // Tramos de un tipo en el período (sin reestructuras: a ellas no se les miden tiempos)
   function tramosPeriodo(C, D, tipo, desde, hasta, filtro = {}) {
     return D.tramos.filter((t) => {
@@ -222,6 +266,6 @@
     });
   }
 
-  window.DAC = { PRODUCTOS, RANGOS, slug, iso, fecha, sumarDias, dias, feriadosPropuestos, contexto, metricas,
-    resumenTiempos, tramosPeriodo };
+  window.DAC = { PRODUCTOS, RANGOS, METAS, slug, iso, fecha, sumarDias, dias, feriadosPropuestos, contexto, metricas,
+    resumenTiempos, tramosPeriodo, mismoMes, semanaMes, reprocesos };
 })();

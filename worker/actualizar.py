@@ -21,10 +21,12 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from tiempos_dac.conexion import RAIZ, consultar, leer_config  # noqa: E402
-from tiempos_dac.motor import Jornada, calcular  # noqa: E402
+from tiempos_dac.motor import Jornada, calcular, flujo_rapido, resumen_bitacora, tiempos_motor, usuarios_dac  # noqa: E402
 
 LOG = RAIZ / "worker" / "logs" / "actualizar.log"
 DIAS_CIERRE = 5  # los primeros días del mes se vuelve a leer el mes anterior para cerrarlo al corte
+# Jefatura del DAC (personal del DAC para el ciclo por departamento; se puede cambiar en dac_config.jefatura)
+JEFATURA = ["HILCIA PAOLA MORALES MENDEZ", "KATHERINE GISSELL MORA GARCIA"]
 
 
 def _json(v):
@@ -41,7 +43,7 @@ def _registros(df: pd.DataFrame) -> list[dict]:
     return [{k: _json(v) for k, v in r.items()} for r in df.to_dict("records")]
 
 
-def procesar(cfg: dict, jornada: Jornada, historico: bool = False) -> tuple[list[dict], list[dict]]:
+def procesar(cfg: dict, jornada: Jornada, personal_dac: set[str], historico: bool = False) -> dict:
     sql = {k: (RAIZ / v).read_text(encoding="utf-8-sig")
            for k, v in cfg["consultas_historico" if historico else "consultas"].items()}
     if not historico and date.today().day <= DIAS_CIERRE:
@@ -57,15 +59,37 @@ def procesar(cfg: dict, jornada: Jornada, historico: bool = False) -> tuple[list
         # La consulta anual viene ordenada de la más reciente a la más antigua; se invierte para que los cambios
         # con la misma hora queden en el mismo orden que en la consulta mensual.
         his = his.iloc[::-1].reset_index(drop=True)
-    sol, tr = calcular(his, bit, jornada)
+    # Personal del DAC: analistas registrados, jefatura y quien registra estados del DAC (analistas anteriores, auditores)
+    personal = personal_dac | usuarios_dac(his)
+    sol, tr = calcular(his, bit, jornada, personal=personal)
     sol["periodo"] = sol["ingreso_dac"].dt.strftime("%Y-%m")
     sol = sol[["solicitud", "periodo", "creada", "ingreso_dac", "tipo_credito", "producto", "reestructura",
-               "monto_colocado", "estado_actual", "promotor", "sucursal", "decision", "fecha_decision",
-               "segundos_total"]]
+               "monto_colocado", "monto_aprobado", "estado_actual", "promotor", "sucursal", "decision", "fecha_decision",
+               "segundos_total", "ultimo_estado", "ultimo_cambio", "ultimo_usuario", "ciclo"]]
+    rap = flujo_rapido(his, bit, jornada, personal=personal)
+    res = resumen_bitacora(bit, set(sol["solicitud"]), set(rap["solicitud"]))
+    mot, lentas = tiempos_motor(his, bit, set(sol["solicitud"]), set(rap["solicitud"]))
     tr["n"] = tr.groupby("solicitud").cumcount() + 1
     tr = tr[["solicitud", "n", "tipo", "analista", "inicio", "fin", "fin_estado", "estados", "cruza_dia"]]
-    logging.info("Universo DAC: %s solicitudes, %s tramos", len(sol), len(tr))
-    return _registros(sol), _registros(tr)
+    logging.info("Universo DAC: %s solicitudes, %s tramos; Flujo Rápido: %s; bitácora: %s créditos; motor: %s (%s de más de 1 min)",
+                 len(sol), len(tr), len(rap), int(res["n"].sum()), int(mot["n"].sum()), len(lentas))
+    return {"solicitudes": _registros(sol), "tramos": _registros(tr), "flujo": _registros(rap),
+            "resumen": _registros(res), "motor": _registros(mot), "lentas": _registros(lentas),
+            "periodos": sorted(set(res["periodo"]) | set(mot["periodo"]))}
+
+
+def personal_nube(sb) -> set[str]:
+    conf = {c["clave"]: c["valor"] for c in sb.leer("dac_config")}
+    return {a["nombre"] for a in sb.leer("dac_analistas")} | set(conf.get("jefatura", JEFATURA))
+
+
+def cargar_extra(sb, R: dict):
+    """Flujo Rápido, resumen de la bitácora y tiempos del motor; si las tablas aún no existen, se avisa y sigue."""
+    try:
+        sb.rpc("dac_cargar_extra", {"p_periodos": R["periodos"], "p_flujo": R["flujo"], "p_resumen": R["resumen"],
+                                    "p_motor": R["motor"], "p_lentas": R["lentas"]})
+    except Exception as e:
+        logging.warning("No se cargó Flujo Rápido / bitácora / motor (¿falta ejecutar la migración en supabase/?): %s", e)
 
 
 def jornada_nube(sb) -> Jornada:
@@ -81,9 +105,10 @@ def actualizar_nube(cfg: dict, sb, pedido: int | None = None):
     if pedido:
         sb.actualizar("dac_actualizaciones", f"id=eq.{pedido}", {"estado": "procesando", "iniciado_en": ahora()})
     try:
-        sols, trs = procesar(cfg, jornada_nube(sb))
-        n = sb.rpc("dac_cargar", {"p_solicitudes": sols, "p_tramos": trs})
-        msg = f"{len(sols)} solicitudes y {n} tramos cargados"
+        R = procesar(cfg, jornada_nube(sb), personal_nube(sb))
+        n = sb.rpc("dac_cargar", {"p_solicitudes": R["solicitudes"], "p_tramos": R["tramos"]})
+        cargar_extra(sb, R)
+        msg = f"{len(R['solicitudes'])} solicitudes y {n} tramos cargados; Flujo Rápido {len(R['flujo'])}"
         logging.info(msg)
         if pedido:
             sb.actualizar("dac_actualizaciones", f"id=eq.{pedido}", {"estado": "ok", "terminado_en": ahora(), "mensaje": msg})
@@ -97,7 +122,8 @@ def actualizar_nube(cfg: dict, sb, pedido: int | None = None):
 
 def cargar_historico(cfg: dict, sb, lote: int = 1000):
     """Carga única de los meses anteriores (consultas *anual.sql), en lotes para no exceder el tamaño de la llamada."""
-    sols, trs = procesar(cfg, jornada_nube(sb), historico=True)
+    R = procesar(cfg, jornada_nube(sb), personal_nube(sb), historico=True)
+    sols, trs = R["solicitudes"], R["tramos"]
     por_sol: dict[int, list[dict]] = {}
     for t in trs:
         por_sol.setdefault(t["solicitud"], []).append(t)
@@ -107,6 +133,7 @@ def cargar_historico(cfg: dict, sb, lote: int = 1000):
         total += sb.rpc("dac_cargar", {"p_solicitudes": parte,
                                        "p_tramos": [t for s in parte for t in por_sol.get(s["solicitud"], [])]})
         logging.info("Histórico: %s de %s solicitudes cargadas", min(i + lote, len(sols)), len(sols))
+    cargar_extra(sb, R)
     logging.info("Histórico cargado: %s solicitudes y %s tramos", len(sols), total)
 
 
@@ -134,10 +161,11 @@ def escuchar(cfg: dict):
 
 
 def local(cfg: dict):
-    sols, trs = procesar(cfg, Jornada())
+    R = procesar(cfg, Jornada(), set(JEFATURA))
     destino = RAIZ / "public" / "local" / "datos.json"
     destino.parent.mkdir(parents=True, exist_ok=True)
-    destino.write_text(json.dumps({"solicitudes": sols, "tramos": trs,
+    destino.write_text(json.dumps({"solicitudes": R["solicitudes"], "tramos": R["tramos"], "flujo_rapido": R["flujo"],
+                                   "bitacora_resumen": R["resumen"], "motor_resumen": R["motor"], "motor_lentas": R["lentas"],
                                    "ultima_actualizacion": datetime.now().astimezone().isoformat()},
                                   ensure_ascii=False), encoding="utf-8")
     logging.info("Escrito %s", destino)

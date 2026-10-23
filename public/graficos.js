@@ -27,8 +27,10 @@
   }
   const corto = (v) => (Math.abs(v) >= 1000 ? (v / 1000).toFixed(1).replace(/\.0$/, '') + 'K' : +v.toFixed(2) + '');
 
-  // Columnas de una serie. datos: [{x, y, tip}]
-  function columnas(datos, { alto = 220, color = 'var(--s-pers)', fmt = corto, marcarMax = true } = {}) {
+  const clic = (d) => (d.clic ? ` data-clic="${esc(d.clic)}" style="cursor:pointer"` : '');
+
+  // Columnas de una serie. datos: [{x, y, tip, clic}]; etiquetas = valor sobre cada columna
+  function columnas(datos, { alto = 220, color = 'var(--s-pers)', fmt = corto, marcarMax = true, etiquetas = false } = {}) {
     const W = 760, H = alto, m = { l: 34, r: 8, t: 18, b: 26 };
     const { max, ticks } = escala(Math.max(...datos.map((d) => d.y), 0));
     const bw = (W - m.l - m.r) / Math.max(datos.length, 1);
@@ -41,9 +43,9 @@
       const cx = m.l + bw * i + bw / 2, top = y(d.y), h = H - m.b - top;
       const r = Math.min(4, h);
       if (h > 0) s += `<path d="M${cx - ancho / 2},${H - m.b} V${top + r} q0,-${r} ${r},-${r} H${cx + ancho / 2 - r} q${r},0 ${r},${r} V${H - m.b} Z" fill="${color}"/>`;
-      s += `<rect x="${cx - bw / 2}" y="${m.t}" width="${bw}" height="${H - m.t - m.b}" fill="transparent" data-tip="${esc(d.tip || `${d.x}: ${fmt(d.y)}`)}"/>`;
+      s += `<rect x="${cx - bw / 2}" y="${m.t}" width="${bw}" height="${H - m.t - m.b}" fill="transparent" data-tip="${esc(d.tip || `${d.x}: ${fmt(d.y)}`)}"${clic(d)}/>`;
       if (datos.length <= 16 || i % Math.ceil(datos.length / 16) === 0) s += `<text x="${cx}" y="${H - 8}" text-anchor="middle">${esc(d.x)}</text>`;
-      if (i === iMax && d.y > 0) s += `<text class="lbl" x="${cx}" y="${top - 5}" text-anchor="middle">${fmt(d.y)}</text>`;
+      if ((etiquetas || i === iMax) && d.y > 0) s += `<text class="lbl" x="${cx}" y="${top - 5}" text-anchor="middle">${fmt(d.y)}</text>`;
     });
     return `<div class="chart">${s}<line x1="${m.l}" x2="${W - m.r}" y1="${H - m.b}" y2="${H - m.b}" stroke="#B9BFCA"/></svg></div>`;
   }
@@ -87,5 +89,30 @@
       <div class="val">${d.y == null ? '—' : fmt(d.y)}</div>`).join('')}</div>`;
   }
 
-  window.GRAF = { columnas, lineas, barras, esc };
+  // Columnas apiladas al 100%. datos: [{x, partes: [v1, v2, ...], tip, clic}]; series: [{nombre, color}]
+  function apiladas(datos, series, { alto = 230 } = {}) {
+    const W = 760, H = alto, m = { l: 8, r: 8, t: 10, b: 26 };
+    const bw = (W - m.l - m.r) / Math.max(datos.length, 1);
+    const ancho = Math.min(46, bw * 0.62);
+    const alto0 = H - m.t - m.b;
+    let s = `<svg viewBox="0 0 ${W} ${H}" role="img">`;
+    datos.forEach((d, i) => {
+      const cx = m.l + bw * i + bw / 2, tot = d.partes.reduce((a, b) => a + b, 0);
+      let y0 = H - m.b;
+      if (tot) d.partes.forEach((v, k) => {
+        const h = (v / tot) * alto0;
+        if (h > 0) {
+          s += `<rect x="${cx - ancho / 2}" y="${y0 - h}" width="${ancho}" height="${h}" fill="${series[k].color}"/>`;
+          if (h >= 14) s += `<text x="${cx}" y="${y0 - h / 2 + 4}" text-anchor="middle" style="fill:#fff;font-weight:700">${((100 * v) / tot).toFixed(1)}%</text>`;
+        }
+        y0 -= h;
+      });
+      s += `<rect x="${cx - bw / 2}" y="${m.t}" width="${bw}" height="${alto0}" fill="transparent" data-tip="${esc(d.tip || d.x)}"${clic(d)}/>`;
+      s += `<text x="${cx}" y="${H - 8}" text-anchor="middle" style="font-weight:${d.total ? 800 : 400}">${esc(d.x)}</text>`;
+    });
+    const ley = `<div class="leyenda">${series.map((se) => `<span><i style="background:${se.color}"></i>${esc(se.nombre)}</span>`).join('')}</div>`;
+    return `${ley}<div class="chart">${s}</svg></div>`;
+  }
+
+  window.GRAF = { columnas, lineas, barras, apiladas, esc };
 })();

@@ -8,21 +8,27 @@
   const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
   const DSEM = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
   const COLOR = { PERS: 'var(--s-pers)', PYMES: 'var(--s-pymes)', MOTO: 'var(--s-moto)' };
-  const ROLES = { admin: 'Administrador', jefe: 'Jefe DAC', analista: 'Analista', gerente: 'Gerente DAC' };
+  const ROLES = { admin: 'Administrador', jefe: 'Jefe DAC', analista: 'Analista', reproceso: 'Analista con reprocesamiento', gerente: 'Gerente DAC' };
   const INICIO = '2026-01'; // información cargada desde enero 2026 (histórico) y en línea desde octubre
   const TABS = [
-    ['dashboard', 'Dashboard', ['admin', 'jefe', 'gerente', 'analista']],
-    ['tiempos', 'Tiempos por analista', ['admin', 'jefe', 'analista']],
-    ['reproceso', 'Preaprobado condicionado', ['admin', 'jefe', 'analista']],
-    ['productividad', 'Productividad por analista', ['admin', 'jefe', 'analista']],
-    ['acumulado', 'Acumulado', ['admin', 'jefe', 'analista']],
+    ['dashboard', 'Dashboard', ['admin', 'jefe', 'gerente', 'analista', 'reproceso']],
+    ['tiempos', 'Tiempos por analista', ['admin', 'jefe', 'analista', 'reproceso']],
+    ['reproceso', 'Preaprobado condicionado', ['admin', 'jefe', 'reproceso']],
+    ['cartera', 'Cartera actual', ['admin', 'jefe', 'analista', 'reproceso']],
+    ['productividad', 'Productividad por analista', ['admin', 'jefe', 'analista', 'reproceso']],
+    ['acumulado', 'Acumulado', ['admin', 'jefe', 'analista', 'reproceso']],
     ['global', 'Departamento (global)', ['admin', 'jefe']],
+    ['motor', 'Flujo Rápido y motor', ['admin', 'jefe']],
+    ['ciclo', 'Ciclo de la solicitud', ['admin', 'gerente']],
+    ['capacidad', 'Capacidad instalada', ['admin', 'jefe']],
     ['calendario', 'Vacaciones y calendario', ['admin', 'jefe']],
     ['admin', 'Administración', ['admin', 'jefe']],
   ];
 
   const S = { perfil: null, D: null, C: null, tab: 'dashboard', mes: null, producto: '', tipo: '', vista: 'analista',
-    gran: 'mes', anio: null, calMes: null, buscar: '', pedido: null };
+    gran: 'mes', anio: null, calMes: null, buscar: '', pedido: null, dgran: 'mes', dper: null, cap: null,
+    camino: 'todas', cfin: 'final', cmed: null };
+  const MES3 = MESES.map((m) => m.slice(0, 3));
 
   // ---------- Formato ----------
   const n0 = (v) => (v == null ? '—' : Math.round(v).toLocaleString('es-NI'));
@@ -49,8 +55,11 @@
   const rangoTxt = (r) => (r === Infinity ? '+240' : `-${String(r).padStart(2, '0')}`);
   const heat = (v) => (v ? `background:rgba(75,157,69,${Math.min(0.85, 0.08 + v * 1.6)});color:${v > 0.3 ? '#fff' : 'inherit'}` : 'color:#B9BFCA');
   const puede = (tab) => TABS.find((t) => t[0] === tab)[2].includes(S.perfil.rol);
-  const soloYo = () => (S.perfil.rol === 'analista' ? S.perfil.analista : null);
+  const soloYo = () => (['analista', 'reproceso'].includes(S.perfil.rol) ? S.perfil.analista : null);
   const aviso = (e) => alert(e.message || e);
+  const metas = () => S.C.cfg.metas;
+  const metaTxt = () => DAC.PRODUCTOS.map((p) => `${p} ≤ ${metas()[p]} min`).join(' · ');
+  const min2 = (s) => (s == null ? null : Math.round(s / 6) / 10); // segundos → minutos con un decimal (para Excel)
 
   // ---------- Ingreso ----------
   function login(msg = '') {
@@ -79,10 +88,7 @@
 
   async function iniciar() {
     app.innerHTML = '<div class="vacio">Cargando información…</div>';
-    S.D = await API.cargar();
-    S.D.solicitudes = S.D.solicitudes || [];
-    S.D.tramos = S.D.tramos || [];
-    S.D.config = Object.fromEntries((S.D.config || []).map((c) => [c.clave, c.valor]));
+    S.D = preparar(await API.cargar());
     S.C = DAC.contexto({ ...S.D, config: S.D.config });
     const hoy = DAC.iso(new Date()).slice(0, 7);
     S.mes = S.mes || hoy;
@@ -92,6 +98,23 @@
     pintar();
   }
   const recalcular = () => { S.C = DAC.contexto({ ...S.D, config: S.D.config }); };
+  // Universo DAC: lo creado en un mes que entró al DAC el mes siguiente no cuenta como ingreso (queda en fueraDeMes)
+  function preparar(D) {
+    const sols = D.solicitudes || [];
+    D.fueraDeMes = sols.filter((s) => !DAC.mismoMes(s));
+    D.solicitudes = sols.filter(DAC.mismoMes);
+    D.tramos = D.tramos || [];
+    D.flujo_rapido = D.flujo_rapido || [];
+    D.bitacora_resumen = D.bitacora_resumen || [];
+    D.config = Object.fromEntries((D.config || []).map((c) => [c.clave, c.valor]));
+    D.motor_resumen = D.motor_resumen || [];
+    D.motor_lentas = D.motor_lentas || [];
+    // Todo el preaprobado condicionado queda al analista con reprocesamiento (Liliana), aunque otro analista
+    // haya vuelto a guardar el preaprobado (indicado por el usuario 23-oct)
+    const rep = D.config.analista_reproceso;
+    if (rep) for (const t of D.tramos) if (t.tipo === 'reproceso') t.analista = rep;
+    return D;
+  }
 
   // ---------- Estructura ----------
   function pintar() {
@@ -105,14 +128,56 @@
           <button class="btn sec mini" data-act="salir">Salir</button></div>
       </header>
       ${tabs.length > 1 ? `<nav class="tabs">${tabs.map((t) => `<button data-tab="${t[0]}" class="${t[0] === S.tab ? 'on' : ''}">${t[1]}</button>`).join('')}</nav>` : ''}
-      <main id="main"></main>`;
+      <main id="main"></main><div id="modal"></div>`;
     vista();
   }
   function vista() {
     const m = $('#main');
+    LISTAS = [];
     try { m.innerHTML = VISTAS[S.tab](); } catch (e) { console.error(e); m.innerHTML = `<div class="card nota alerta">Error al calcular: ${esc(e.message)}</div>`; }
-    if (S.tab === 'dashboard') vigilarPedido();
+    if (S.tab === 'dashboard' || S.tab === 'cartera') vigilarPedido();
   }
+
+  // ---------- Ventana de detalle (lista de solicitudes) ----------
+  let MODAL = null;
+  const limite = (f) => (f.metaSeg !== undefined ? f.metaSeg : (metas()[f.producto] || 30) * 60);
+  function abrirLista(tituloLista, filas) {
+    MODAL = { titulo: tituloLista, filas };
+    const depto = filas.some((f) => f.dac != null);
+    $('#modal').innerHTML = `<div class="velo" data-cerrar="1"><div class="ventana card" role="dialog" aria-label="${esc(tituloLista)}">
+      <div class="cabeza"><h3>${tituloLista} · ${n0(filas.length)} ${filas.length === 1 ? 'registro' : 'registros'}</h3>
+        <div><button class="btn sec mini" data-act="bajarModal">⬇ Descargar Excel</button> <button class="btn sec mini" data-cerrar="1">Cerrar</button></div></div>
+      <div class="tabla"><table><thead><tr><th>Solicitud</th><th>Producto</th><th>Tipo de crédito</th><th>Tipo</th><th>Analista</th><th>Inicio</th><th>Fin</th><th>Termina en</th><th class="num">Tiempo</th>${depto ? '<th class="num">DAC</th><th class="num">Comercial</th>' : ''}<th class="num">Meta</th><th>Estado hoy</th></tr></thead><tbody>
+      ${filas.map((f) => `<tr><td><button class="lnk" data-ver="${f.solicitud}">${f.solicitud}</button></td><td>${f.producto ? prodTag(f.producto) : ''}</td><td>${esc(f.tipo_credito || '')}</td>
+        <td>${esc(f.tipo || '')}</td><td>${esc(titulo(f.analista || ''))}</td><td>${fh(f.inicio)}</td><td>${fh(f.fin)}</td><td>${esc(f.fin_estado || '')}</td>
+        <td class="num"><b>${dur(f.segundos)}</b></td>${depto ? `<td class="num">${dur(f.dac)}</td><td class="num">${dur(f.com)}</td>` : ''}<td class="num">${f.segundos == null || limite(f) == null ? '' : f.segundos <= limite(f) ? '<span style="color:var(--verde)">✓</span>' : '<span style="color:var(--rojo)">✗</span>'}</td>
+        <td class="small">${esc(f.estado_hoy || '')}</td></tr>`).join('')}</tbody></table></div></div></div>`;
+  }
+  const cerrarLista = () => { MODAL = null; $('#modal').innerHTML = ''; };
+  // Fila de detalle a partir de un tramo
+  function filaTramo(t) {
+    const s = S.C.solPorId.get(t.solicitud) || {};
+    return { solicitud: t.solicitud, producto: s.producto, tipo_credito: s.tipo_credito, tipo: t.tipo === 'analisis' ? 'Análisis' : 'Preaprobado condicionado',
+      analista: t.analista, inicio: t.inicio, fin: t.fin, fin_estado: t.fin_estado, segundos: S.C.segundosTramo(t), estado_hoy: s.ultimo_estado || s.estado_actual };
+  }
+
+  // ---------- Descarga a Excel (SheetJS, se carga solo al usarlo) ----------
+  let xlsx = null;
+  async function excel(nombre, hojas) {
+    if (!xlsx) xlsx = new Promise((ok, mal) => {
+      const sc = document.createElement('script');
+      sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+      sc.onload = () => ok(window.XLSX); sc.onerror = () => { xlsx = null; mal(new Error('No se pudo cargar el generador de Excel (revise la conexión a internet).')); };
+      document.head.appendChild(sc);
+    });
+    const X = await xlsx, wb = X.utils.book_new();
+    for (const [h, filas] of Object.entries(hojas)) X.utils.book_append_sheet(wb, X.utils.json_to_sheet(filas.length ? filas : [{ '': 'Sin datos' }]), h.slice(0, 31));
+    X.writeFile(wb, `${nombre}.xlsx`);
+  }
+  const xlsFila = (f) => ({ Solicitud: f.solicitud, Producto: f.producto, 'Tipo de crédito': f.tipo_credito, Tipo: f.tipo, Analista: f.analista,
+    Inicio: f.inicio, Fin: f.fin, 'Termina en': f.fin_estado, 'Tiempo (min)': min2(f.segundos),
+    ...(f.dac != null ? { 'DAC (min)': min2(f.dac), 'Comercial (min)': min2(f.com) } : {}),
+    'Meta (min)': limite(f) == null ? null : limite(f) / 60, 'Estado hoy': f.estado_hoy });
 
   // Selector de mes, producto y tipo de crédito
   function meses() {
@@ -129,52 +194,132 @@
   }
   const filtroDatos = () => ({ producto: S.producto, tipo: S.tipo });
 
-  function notaHoy(M) {
-    const C = S.C, [d, h] = rangoMes(S.mes);
-    if (!(C.hoy >= d && C.hoy <= h)) return `Días hábiles del mes: <b>${n2(M.depto.diasMes)}</b>.`;
+  function notaHoy(M, [d, h] = rangoMes(S.mes)) {
+    const C = S.C;
+    if (!(C.hoy >= d && C.hoy <= h)) return `Días hábiles del período: <b>${n2(M.depto.diasMes)}</b>.`;
     const modo = { excluir: 'no se cuenta', completo: 'se cuenta completo', proporcional: `cuenta ${n2(C.valorTranscurrido(C.hoy))} de ${n2(C.valorDia(C.hoy))} (proporcional a la jornada transcurrida)` }[C.cfg.modo_hoy];
-    return `Días hábiles transcurridos: <b>${n2(M.depto.diasHabiles)}</b> de ${n2(M.depto.diasMes)} del mes · hoy ${modo}.`;
+    return `Días hábiles transcurridos: <b>${n2(M.depto.diasHabiles)}</b> de ${n2(M.depto.diasMes)} del período · hoy ${modo}.`;
   }
 
   // ---------- Dashboard ----------
+  const SERIE_META = () => [{ nombre: 'Dentro de la meta', color: 'var(--navy)' }, { nombre: 'Fuera de la meta', color: 'var(--verde)' }];
+  const partesMeta = (R) => (R.n ? [Math.round(R.enMeta * R.n), R.n - Math.round(R.enMeta * R.n)] : [0, 0]);
+  const tipMeta = (nom, R) => `<b>${nom}</b><br>${n0(R.n)} solicitudes con tiempo medido<br>Dentro de la meta: ${pct(R.enMeta)}<br>Mediana: ${dur(R.mediana)}`;
+  function listaPeriodos(gran) {
+    const out = [];
+    for (let y = Number(INICIO.slice(0, 4)); y <= new Date().getFullYear(); y++) out.push(...periodos(gran, y));
+    return out.reverse();
+  }
+  function periodoDash() {
+    const L = listaPeriodos(S.dgran);
+    const P = (S.dgran === 'mes' ? L.find((p) => p.desde.slice(0, 7) === S.mes) : L.find((p) => p.desde === S.dper)) || L[0];
+    S.dper = P.desde;
+    if (S.dgran === 'mes') S.mes = P.desde.slice(0, 7);
+    return { P, L };
+  }
+  const mesesEntre = (d, h) => {
+    const out = [];
+    for (let m = d.slice(0, 7); m <= h.slice(0, 7);) { out.push(m); const [y, k] = m.split('-').map(Number); m = DAC.iso(new Date(y, k, 1)).slice(0, 7); }
+    return out;
+  };
+  const casosDe = (C, sols) => sols.filter((s) => !s.reestructura).map((s) => C.global(s)).filter(Boolean);
+  const flujoEn = (d, h) => S.D.flujo_rapido.filter((x) => x.creada && x.creada.slice(0, 10) >= d && x.creada.slice(0, 10) <= h);
+
   function dashboard() {
-    const [d, h] = rangoMes(S.mes);
+    const { P, L } = periodoDash();
+    const d = P.desde, h = P.hasta, esMes = S.dgran === 'mes';
     const C = S.C, M = DAC.metricas(C, S.D, d, h);
-    const meta = Number(C.cfg.meta_minutos);
-    const glob = M.sols.filter((s) => !s.reestructura).map((s) => C.global(s)).filter(Boolean).map((g) => g.segundos);
-    const T = DAC.resumenTiempos(glob, meta);
-    const R = DAC.resumenTiempos(DAC.tramosPeriodo(C, S.D, 'reproceso', d, h).map(C.segundosTramo), meta);
-    const porDia = new Map();
-    for (const s of M.sols) { const k = s.ingreso_dac.slice(0, 10); porDia.set(k, (porDia.get(k) || 0) + 1); }
-    const diasMes = [...DAC.dias(d, h > C.hoy ? C.hoy : h)].map((f) => ({ x: Number(f.slice(8)), y: porDia.get(f) || 0,
-      tip: `${f.slice(8)}/${f.slice(5, 7)} · ${n0(porDia.get(f) || 0)} solicitudes · ${C.valorDia(f) ? `día hábil ${C.valorDia(f)}` : 'no hábil'}` }));
+    const casos = casosDe(C, M.sols);
+    const T = DAC.resumenTiempos(casos, metas());
+    const R = DAC.resumenTiempos(DAC.reprocesos(C, S.D, d, h), metas());
+    const fr = flujoEn(d, h);
+    const hastaHoy = h > C.hoy ? C.hoy : h;
+    const nomP = esMes ? mesTxt(S.mes) : P.nom;
+
+    // Ingresos al DAC: el día (o mes) en que la solicitud pasó por primera vez a POR ASIGNAR A ANALISTA
+    let graf1;
+    if (esMes) {
+      const porDia = new Map();
+      for (const s of M.sols) { const k = s.ingreso_dac.slice(0, 10); porDia.set(k, (porDia.get(k) || 0) + 1); }
+      graf1 = `<h3>Solicitudes que ingresaron al DAC por día</h3>${GRAF.columnas([...DAC.dias(d, hastaHoy)].map((f) => ({ x: Number(f.slice(8)), y: porDia.get(f) || 0,
+        tip: `${f.slice(8)}/${f.slice(5, 7)} · ${n0(porDia.get(f) || 0)} solicitudes · ${C.valorDia(f) ? `día hábil ${C.valorDia(f)}` : 'no hábil'}` })), { fmt: n0 })}`;
+    } else {
+      graf1 = `<h3>Solicitudes que ingresaron al DAC por mes</h3>${GRAF.columnas(mesesEntre(d, hastaHoy).map((m) => {
+        const n = M.sols.filter((s) => s.ingreso_dac.startsWith(m)).length;
+        return { x: MES3[Number(m.slice(5)) - 1], y: n, tip: `${mesTxt(m)} · ${n0(n)} solicitudes<br><i>clic para ver el mes</i>`, clic: `mes:${m}` };
+      }), { fmt: n0, etiquetas: true })}`;
+    }
+    graf1 += '<p class="muted small" style="margin:4px 0 0">Fecha en que la solicitud pasó por primera vez a POR ASIGNAR A ANALISTA. Si se creó en un mes y entró al DAC el mes siguiente, no se cuenta como ingreso.</p>';
+
+    // Horas pico: hora en que ingresó al DAC
+    const porHora = new Map();
+    for (const s of M.sols) { const k = Number(s.ingreso_dac.slice(11, 13)); porHora.set(k, (porHora.get(k) || 0) + 1); }
+    const maxH = Math.max(1, ...porHora.values());
+    const horas = `<h3>Horas pico</h3><p class="muted small" style="margin-top:-4px">Hora en que la solicitud ingresó al DAC</p>
+      <div class="tabla"><table class="compacta"><thead><tr><th>Hora de ingreso</th><th class="num">Cantidad</th><th class="num">%</th><th style="width:45%"></th></tr></thead><tbody>
+      ${[...porHora.keys()].sort((a, b) => a - b).map((k) => { const n = porHora.get(k); return `<tr><td>${k}:00</td><td class="num">${n0(n)}</td><td class="num">${pct(n / M.sols.length)}</td>
+        <td><div class="bar1"><b style="width:${(100 * n) / maxH}%;background:${n === maxH ? 'var(--navy)' : 'var(--verde)'}"></b></div></td></tr>`; }).join('')}
+      <tr class="total"><td>Total</td><td class="num">${n0(M.sols.length)}</td><td class="num">${M.sols.length ? '100.0%' : '—'}</td><td></td></tr></tbody></table></div>`;
+
+    // Tiempos de respuesta del período: por semana (mes) o por mes (trimestre, semestre, año)
+    const diasP = [...DAC.dias(d, h)];
+    const claves = esMes ? [...new Set(diasP.map((f) => `W${DAC.semanaMes(f)}`))] : mesesEntre(d, h);
+    const grupoDe = (c) => (esMes ? `W${DAC.semanaMes(c.sol.ingreso_dac)}` : c.sol.ingreso_dac.slice(0, 7));
+    const rangoSem = (w) => { const f = diasP.filter((x) => `W${DAC.semanaMes(x)}` === w); return `${Number(f[0].slice(8))}–${Number(f[f.length - 1].slice(8))} ${MES3[Number(d.slice(5, 7)) - 1].toLowerCase()}`; };
+    const porGrupo = claves.map((k) => {
+      const Rk = DAC.resumenTiempos(casos.filter((c) => grupoDe(c) === k), metas());
+      return { x: esMes ? k : MES3[Number(k.slice(5)) - 1], partes: partesMeta(Rk), tip: tipMeta(esMes ? `${k} (${rangoSem(k)})` : mesTxt(k), Rk), clic: esMes ? null : `mes:${k}` };
+    });
+    porGrupo.push({ x: 'Total', total: true, partes: partesMeta(T), tip: tipMeta(`Total ${nomP}`, T) });
+
+    // Evolución del año: tiempos de respuesta y productividad por mes (clic en un mes para verlo)
+    const anio = d.slice(0, 4), mesHoy = C.hoy.slice(0, 7);
+    const mesesAnio = MESES.map((_, i) => `${anio}-${String(i + 1).padStart(2, '0')}`);
+    const MA = mesesAnio.map((m) => (m < INICIO || m > mesHoy ? null : DAC.metricas(C, S.D, ...rangoMes(m))));
+    const RA = MA.map((x) => (x ? DAC.resumenTiempos(casosDe(C, x.sols), metas()) : null));
+    const etq = (i) => `${MES3[i].toLowerCase()}-${anio.slice(2)}`;
+    const evoT = GRAF.apiladas(mesesAnio.map((m, i) => ({ x: etq(i), partes: RA[i] ? partesMeta(RA[i]) : [0, 0],
+      tip: RA[i] ? `${tipMeta(mesTxt(m), RA[i])}<br><i>clic para ver el mes</i>` : `${mesTxt(m)}: sin datos`, clic: RA[i] ? `mes:${m}` : null })), SERIE_META());
+    const evoP = GRAF.columnas(mesesAnio.map((m, i) => ({ x: etq(i), y: MA[i] ? MA[i].depto.prod || 0 : 0,
+      tip: MA[i] ? `<b>${mesTxt(m)}</b><br>Productividad ${n2(MA[i].depto.prod)}<br>${n0(MA[i].depto.n)} solicitudes · ${n2(MA[i].depto.diasHabiles)} días hábiles<br><i>clic para ver el mes</i>` : `${mesTxt(m)}: sin datos`,
+      clic: MA[i] ? `mes:${m}` : null })), { fmt: n2, etiquetas: true, color: 'var(--navy)', marcarMax: false });
+
     const yo = soloYo();
     const pa = M.porAnalista.filter((a) => !yo || a.nombre === yo).sort((a, b) => (b.prod || 0) - (a.prod || 0));
     const ult = S.D.config.ultima_actualizacion;
+    const seg = `<div class="seg">${[['mes', 'Mensual'], ['trimestre', 'Trimestral'], ['semestre', 'Semestral'], ['anio', 'Anual']].map(([k, t]) => `<button data-dgran="${k}" class="${S.dgran === k ? 'on' : ''}">${t}</button>`).join('')}</div>`;
+    const selP = `<select data-f="dper">${L.map((x) => `<option value="${x.desde}" ${x.desde === P.desde ? 'selected' : ''}>${S.dgran === 'mes' ? mesTxt(x.desde.slice(0, 7)) : x.nom}</option>`).join('')}</select>`;
     return `
       <div class="cabeza">
-        <div><h2>Departamento de Análisis · ${mesTxt(S.mes)}</h2>
-          <div class="muted small">${notaHoy(M)} Última actualización: <b>${fh(ult)}</b></div></div>
-        <div>${filtros({ producto: false, tipo: false, extra: '<button class="btn" data-act="actualizar">⟳ Actualizar</button>' })}
+        <div><h2>Departamento de Análisis · ${nomP}</h2>
+          <div class="muted small">${notaHoy(M, [d, h])} Última actualización: <b>${fh(ult)}</b></div></div>
+        <div><div class="filtros"><label>Período${seg}</label><label>&nbsp;${selP}</label><button class="btn" data-act="actualizar">⟳ Actualizar</button></div>
           <div class="estado-act muted" id="estadoAct" style="margin-top:-8px"></div></div>
       </div>
       <div class="kpis">
         <div class="kpi"><div class="l">Solicitudes DAC</div><div class="v">${n0(M.depto.n)}</div><div class="s">${n0(M.depto.reestructuras)} reestructuras · ${n2(M.depto.porDia)} por día hábil</div></div>
         <div class="kpi verde"><div class="l">Productividad del departamento</div><div class="v">${n2(M.depto.prod)}</div><div class="s">ponderada por producto · ${DAC.PRODUCTOS.map((p) => `${p} ${pct(M.depto.peso[p])}`).join(' · ')}</div></div>
         <div class="kpi cielo"><div class="l">Tiempo de la solicitud</div><div class="v">${dur(T.mediana)}</div><div class="s">mediana · promedio ${dur(T.prom)}</div></div>
-        <div class="kpi lima"><div class="l">Dentro de ${meta} min</div><div class="v">${pct(T.enMeta)}</div><div class="s">${n0(T.n)} solicitudes con tiempo medido</div></div>
-        <div class="kpi naranja"><div class="l">Preaprobado condicionado</div><div class="v">${n0(R.n)}</div><div class="s">reprocesos · mediana ${dur(R.mediana)}</div></div>
+        <div class="kpi lima"><div class="l">Dentro de la meta</div><div class="v">${pct(T.enMeta)}</div><div class="s">${metaTxt()} · ${n0(T.n)} solicitudes</div></div>
+        <div class="kpi naranja"><div class="l">Preaprobado condicionado</div><div class="v">${n0(R.n)}</div><div class="s">solicitudes reprocesadas · mediana en análisis ${dur(R.mediana)}</div></div>
+        <div class="kpi blanco"><div class="l">Flujo Rápido (motor)</div><div class="v">${n0(fr.length)}</div><div class="s">sin pasar por un analista · ${n0(fr.filter((x) => x.resolucion === 'APROBADO POR MOTOR').length)} aprobadas por motor</div></div>
       </div>
-      <div class="grid g3" style="margin-bottom:14px">${DAC.PRODUCTOS.map((p) => { const x = M.porProducto[p]; return `
+      <div class="grid g3" style="margin-bottom:14px">${DAC.PRODUCTOS.map((p) => { const x = M.porProducto[p], Tp = DAC.resumenTiempos(casos.filter((c) => c.p === p), metas()); return `
         <div class="card"><h3>${prodTag(p)}</h3>
           <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="tit" style="font-size:28px;font-weight:800;color:var(--navy)">${n2(x.prod)}</span><span class="muted small">productividad</span></div>
-          <div class="muted small">${n0(x.n)} solicitudes · ${n2(x.porDia)} por día · ${x.analistas} analistas (${n2(x.equiv)} disponibles)</div></div>`; }).join('')}</div>
+          <div class="muted small">${n0(x.n)} solicitudes · ${n2(x.porDia)} por día · ${x.analistas} analistas (${n2(x.equiv)} disponibles)<br>
+            Meta ≤ ${metas()[p]} min: <b>${pct(Tp.enMeta)}</b> dentro · mediana ${dur(Tp.mediana)}</div></div>`; }).join('')}</div>
       <div class="grid g2">
-        <div class="card"><h3>Solicitudes que ingresaron al DAC por día</h3>${GRAF.columnas(diasMes, { fmt: n0 })}</div>
+        <div class="card">${graf1}</div>
+        <div class="card">${horas}</div>
+        <div class="card"><h3>Tiempos de respuesta · ${nomP}</h3><p class="muted small" style="margin-top:-4px">Tiempo de la solicitud contra la meta de su producto (${metaTxt()}).${esMes ? ' Semanas de lunes a domingo según el día de ingreso al DAC.' : ' Clic en un mes para verlo.'}</p>
+          ${GRAF.apiladas(porGrupo, SERIE_META())}</div>
         <div class="card"><h3>Productividad por analista</h3><p class="muted small" style="margin-top:-4px">Solicitudes en que intervino / días disponibles</p>
           ${GRAF.barras(pa.map((a) => ({ nombre: titulo(a.nombre), y: a.prod, color: COLOR[a.producto],
             tip: `${esc(titulo(a.nombre))} (${a.producto})<br>${a.n} solicitudes / ${n2(a.disp)} días = ${n2(a.prod)}` })), { fmt: n2 })}
           <div class="leyenda" style="margin-top:8px">${DAC.PRODUCTOS.map((p) => `<span><i style="background:${COLOR[p]};height:10px;width:10px"></i>${p}</span>`).join('')}</div></div>
+        <div class="card"><h3>Tiempos de respuesta por mes · ${anio}</h3><p class="muted small" style="margin-top:-4px">Clic en un mes para verlo.</p>${evoT}</div>
+        <div class="card"><h3>Productividad por mes · ${anio}</h3><p class="muted small" style="margin-top:-4px">Productividad del departamento. Clic en un mes para verlo.</p>${evoP}</div>
       </div>`;
   }
 
@@ -203,49 +348,98 @@
   }
 
   // ---------- Tablas de tiempos ----------
-  function tablaTiempos(grupos, meta, etiqueta = 'Analista') {
-    const total = DAC.resumenTiempos(grupos.flatMap((g) => g.valores), meta);
-    const fila = (nom, R, cls = '') => `<tr class="${cls}"><td>${nom}</td><td class="num">${n0(R.n)}</td><td class="num">${dur(R.prom)}</td><td class="num">${dur(R.mediana)}</td><td class="num"><b>${pct(R.enMeta)}</b></td>
+  // Listas que se abren al hacer clic en una cantidad (se reinicia en cada vista)
+  let LISTAS = [];
+  const lista = (tituloLista, filas) => LISTAS.push({ titulo: tituloLista, filas }) - 1;
+  const conLista = (n, tituloLista, filas) => (filas && filas.length ? `<button class="lnk" data-casos="${lista(tituloLista, filas)}" data-tip="Ver las solicitudes">${n0(n)}</button>` : n0(n));
+
+  // grupos: [{nombre, valores: [{s, p}], filas: [detalle]}]
+  function tablaTiempos(grupos, etiqueta = 'Analista', tituloLista = '') {
+    const total = DAC.resumenTiempos(grupos.flatMap((g) => g.valores), metas());
+    const fila = (nom, R, filas, cls = '') => `<tr class="${cls}"><td>${nom}</td><td class="num">${conLista(R.n, `${tituloLista} · ${nom.replace(/<[^>]+>/g, '')}`, filas)}</td><td class="num">${dur(R.prom)}</td><td class="num">${dur(R.mediana)}</td><td class="num"><b>${pct(R.enMeta)}</b></td>
       ${[...R.dist.values()].map((c) => { const v = R.n ? c / R.n : 0; return `<td class="heat" style="${heat(v)}" data-tip="${c} de ${R.n}">${v ? Math.round(100 * v) + '%' : '·'}</td>`; }).join('')}</tr>`;
-    return `<div class="tabla"><table><thead><tr><th>${etiqueta}</th><th class="num">Casos</th><th class="num">Promedio</th><th class="num">Mediana</th><th class="num">≤ ${meta} min</th>
+    return `<div class="tabla"><table><thead><tr><th>${etiqueta}</th><th class="num">Casos</th><th class="num">Promedio</th><th class="num">Mediana</th><th class="num" data-tip="${metaTxt()} (según el producto de la solicitud)">En meta</th>
       ${[...DAC.RANGOS, Infinity].map((r) => `<th class="num">${rangoTxt(r)}</th>`).join('')}</tr></thead><tbody>
-      ${grupos.map((g) => fila(g.nombre, DAC.resumenTiempos(g.valores, meta))).join('')}
-      ${grupos.length > 1 ? fila('Total', total, 'total') : ''}</tbody></table></div>`;
+      ${grupos.map((g) => fila(g.nombre, DAC.resumenTiempos(g.valores, metas()), g.filas)).join('')}
+      ${grupos.length > 1 ? fila('Total', total, grupos.flatMap((g) => g.filas || []), 'total') : ''}</tbody></table></div>`;
   }
-  const agrupar = (lista, clave, valor) => {
+  const agrupar = (lista0, clave, valor) => {
     const m = new Map();
-    for (const x of lista) { const k = clave(x) || '(sin analista)'; if (!m.has(k)) m.set(k, []); m.get(k).push(valor(x)); }
+    for (const x of lista0) { const k = clave(x) || '(sin analista)'; if (!m.has(k)) m.set(k, []); m.get(k).push(valor(x)); }
     return [...m].map(([k, v]) => ({ k, valores: v })).sort((a, b) => b.valores.length - a.valores.length);
   };
   const nombreAnalista = (k) => `${esc(titulo(k))}${S.C.esAnalista.has(k) ? ` <span class="muted small">${S.C.productoDe.get(k)}</span>` : ' <span class="muted small">(no es analista)</span>'}`;
+  // Tramos agrupados por analista, con su detalle
+  const gruposTramos = (tr) => agrupar(tr, (t) => t.analista, (t) => t)
+    .map((g) => ({ nombre: nombreAnalista(g.k), valores: g.valores.map(S.C.valorTramo), filas: g.valores.map(filaTramo) }));
 
   function notaTiempos() {
     const c = S.C.cfg;
     const j = c.jornada;
-    return `<p class="muted small">Tiempo en <b>${c.modo_tiempo === 'jornada' ? `horas hábiles (L-V ${j.lv[0]}–${j.lv[1]}, sábado ${j.sab[0]}–${j.sab[1]}, más horarios especiales)` : 'hora reloj'}</b>, sin contar: <b>${(c.estados_excluidos || []).join(', ') || 'ningún estado'}</b>. Las reestructuras no se miden. Cada solicitud se mide hasta el cierre del mes en que ingresó. Rangos en minutos (como el Excel: -05 = hasta 5 min).</p>`;
+    return `<p class="muted small">Tiempo en <b>${c.modo_tiempo === 'jornada' ? `horas hábiles (L-V ${j.lv[0]}–${j.lv[1]}, sábado ${j.sab[0]}–${j.sab[1]}, más horarios especiales)` : 'hora reloj'}</b>, sin contar: <b>${(c.estados_excluidos || []).join(', ') || 'ningún estado'}</b>. Las reestructuras no se miden. Cada solicitud se mide hasta el cierre del mes en que ingresó. Meta según el producto de la solicitud: <b>${metaTxt()}</b>. Rangos en minutos (como el Excel: -05 = hasta 5 min). Clic en la cantidad de casos para ver las solicitudes.</p>`;
+  }
+
+  // Solicitudes del mes con los filtros de la pantalla
+  const solsMes = (d, h) => S.D.solicitudes.filter((s) => s.ingreso_dac.slice(0, 10) >= d && s.ingreso_dac.slice(0, 10) <= h
+    && (!S.producto || s.producto === S.producto) && (!S.tipo || s.tipo_credito === S.tipo));
+  const filaSol = (s) => ({ solicitud: s.solicitud, producto: s.producto, tipo_credito: s.tipo_credito, tipo: s.reestructura ? 'Reestructura' : '', inicio: s.ingreso_dac, estado_hoy: s.ultimo_estado || s.estado_actual });
+
+  // Por qué no coinciden las cantidades de las dos vistas y del dashboard
+  function cuadre(d, h) {
+    const C = S.C, sols = solsMes(d, h);
+    const reest = sols.filter((s) => s.reestructura);
+    const sinCaso = sols.filter((s) => !s.reestructura && !C.global(s));
+    const casos = sols.length - reest.length - sinCaso.length;
+    const tr = DAC.tramosPeriodo(C, S.D, 'analisis', d, h, filtroDatos());
+    const porSol = new Map();
+    for (const t of tr) porSol.set(t.solicitud, (porSol.get(t.solicitud) || 0) + 1);
+    const varias = tr.filter((t) => porSol.get(t.solicitud) > 1);
+    const nVarias = new Set(varias.map((t) => t.solicitud)).size;
+    return `<div class="nota"><b>Cuadre de ${mesTxt(S.mes)}:</b> ${n0(sols.length)} solicitudes DAC (Dashboard)
+      − ${conLista(reest.length, 'Reestructuras (no se mide tiempo)', reest.map(filaSol))} reestructuras
+      − ${conLista(sinCaso.length, 'Sin tramo de análisis cerrado', sinCaso.map(filaSol))} sin tramo de análisis cerrado (en cola o en análisis al corte)
+      = <b>${n0(casos)}</b> casos en <i>Tiempo de la solicitud</i>.<br>
+      <i>Tramos por analista</i> cuenta tramos, no solicitudes: ${n0(tr.length)} tramos de ${n0(porSol.size)} solicitudes, porque
+      ${conLista(nVarias, 'Solicitudes con más de un tramo', varias.map(filaTramo))} solicitudes tuvieron más de un tramo (reasignadas, devueltas a la cola, o pre análisis y luego análisis).
+      Los tramos se cuentan en el mes en que empezaron.</div>`;
   }
 
   function tiempos() {
     const [d, h] = rangoMes(S.mes);
-    const C = S.C, meta = Number(C.cfg.meta_minutos), yo = soloYo();
+    const C = S.C, yo = soloYo();
     let grupos, titulo2, extra = '';
     if (S.vista === 'analista') {
       const tr = DAC.tramosPeriodo(C, S.D, 'analisis', d, h, filtroDatos()).filter((t) => !yo || t.analista === yo);
-      grupos = agrupar(tr, (t) => t.analista, C.segundosTramo).map((g) => ({ nombre: nombreAnalista(g.k), valores: g.valores }));
+      grupos = gruposTramos(tr);
       titulo2 = 'Tiempo de cada analista en los tramos que atendió';
       const cruza = tr.filter((t) => t.cruza_dia).length;
       if (cruza && C.cfg.modo_tiempo !== 'jornada') extra = `<div class="nota alerta">${cruza} de ${tr.length} tramos quedan de un día para el otro y en hora reloj cuentan la noche completa. Se puede cambiar a horas hábiles en Administración.</div>`;
     } else {
-      const sols = S.D.solicitudes.filter((s) => s.ingreso_dac.slice(0, 10) >= d && s.ingreso_dac.slice(0, 10) <= h && !s.reestructura
-        && (!S.producto || s.producto === S.producto) && (!S.tipo || s.tipo_credito === S.tipo));
-      const gl = sols.map((s) => C.global(s)).filter((g) => g && (!yo || g.analista === yo));
-      grupos = agrupar(gl, (g) => g.analista, (g) => g.segundos).map((g) => ({ nombre: nombreAnalista(g.k), valores: g.valores }));
-      titulo2 = 'Tiempo de la solicitud: el del último analista, a quien le queda el caso';
+      const gl = solsMes(d, h).filter((s) => !s.reestructura).map((s) => C.global(s)).filter((g) => g && (!yo || g.analista === yo));
+      grupos = agrupar(gl, (g) => g.analista, (g) => g).map((g) => ({ nombre: nombreAnalista(g.k), valores: g.valores, filas: g.valores.map((x) => filaTramo(x.tramo)) }));
+      titulo2 = 'Tiempo de la solicitud: el del analista a quien le queda el caso';
     }
     const seg = `<div class="seg">${[['analista', 'Tramos por analista'], ['caso', 'Tiempo de la solicitud (caso)']].map(([k, t]) => `<button data-vista="${k}" class="${S.vista === k ? 'on' : ''}">${t}</button>`).join('')}</div>`;
-    return `${filtros({ extra: `<label>Vista${seg}</label>` })}
-      <div class="card"><h3>${titulo2} · ${mesTxt(S.mes)}</h3>${notaTiempos()}${extra}${tablaTiempos(grupos, meta)}</div>
+    return `${filtros({ extra: `<label>Vista${seg}</label><button class="btn sec" data-act="bajarTiempos">⬇ Descargar Excel</button>` })}
+      <div class="card"><h3>${titulo2} · ${mesTxt(S.mes)}</h3>${notaTiempos()}${yo ? '' : cuadre(d, h)}${extra}${tablaTiempos(grupos, 'Analista', titulo2.split(':')[0])}</div>
       ${detalleSolicitud()}`;
+  }
+
+  // Excel con los tramos y las solicitudes del mes (con los filtros de la pantalla)
+  async function bajarTiempos() {
+    const [d, h] = rangoMes(S.mes);
+    const C = S.C, yo = soloYo();
+    const tr = [...DAC.tramosPeriodo(C, S.D, 'analisis', d, h, filtroDatos()), ...DAC.tramosPeriodo(C, S.D, 'reproceso', d, h, filtroDatos())]
+      .filter((t) => !yo || t.analista === yo).sort((a, b) => a.solicitud - b.solicitud || a.n - b.n);
+    const sols = solsMes(d, h).filter((s) => !yo || (C.tramosPorSol.get(s.solicitud) || []).some((t) => t.analista === yo));
+    await excel(`Tiempos DAC ${mesTxt(S.mes)}`, {
+      Solicitudes: sols.map((s) => { const g = C.global(s); return { Solicitud: s.solicitud, Producto: s.producto, 'Tipo de crédito': s.tipo_credito, Reestructura: s.reestructura ? 'Sí' : 'No',
+        Creada: s.creada, 'Ingreso al DAC': s.ingreso_dac, 'Analista del caso': g ? g.analista : null, 'Tiempo de la solicitud (min)': g ? min2(g.segundos) : null,
+        'Meta (min)': metas()[s.producto], 'En meta': g && g.segundos != null ? (g.segundos <= metas()[s.producto] * 60 ? 'Sí' : 'No') : null,
+        'Última decisión': s.decision, 'Fecha decisión': s.fecha_decision, 'Creación a decisión (h)': s.segundos_total == null ? null : Math.round(s.segundos_total / 36) / 100,
+        'Estado hoy': s.ultimo_estado || s.estado_actual, Promotor: s.promotor, Sucursal: s.sucursal }; }),
+      Tramos: tr.map((t) => ({ ...xlsFila(filaTramo(t)), Tramo: t.n, ...Object.fromEntries(Object.entries(t.estados || {}).map(([e, v]) => [`${e} (min)`, min2(v[C.cfg.modo_tiempo === 'jornada' ? 1 : 0])])) })),
+    });
   }
 
   function detalleSolicitud() {
@@ -254,31 +448,200 @@
     if (id) {
       const s = S.C.solPorId.get(id), tr = S.C.tramosPorSol.get(id) || [];
       const yo = soloYo();
-      if (!s || (yo && !tr.some((t) => t.analista === yo))) cuerpo = '<p class="muted">No está en el universo DAC cargado (no pasó por POR ASIGNAR A ANALISTA).</p>';
+      const fr = S.D.flujo_rapido.find((x) => x.solicitud === id);
+      const fuera = S.D.fueraDeMes.find((x) => x.solicitud === id);
+      if (fr && !yo) cuerpo = `<p>Es de <b>Flujo Rápido</b>: ${esc(fr.resolucion)} el ${fh(fr.fecha_resolucion)} y siguió sin pasar por un analista. Estado hoy: ${esc(fr.ultimo_estado || fr.estado_actual || '—')}.</p>`;
+      else if (fuera && !yo) cuerpo = `<p class="muted">Se creó el ${fh(fuera.creada)} y entró al DAC el ${fh(fuera.ingreso_dac)}, en otro mes: no se cuenta como ingreso.</p>`;
+      else if (!s || (yo && !tr.some((t) => t.analista === yo))) cuerpo = '<p class="muted">No está en el universo DAC cargado (no pasó por POR ASIGNAR A ANALISTA).</p>';
       else {
         const g = S.C.global(s);
-        cuerpo = `<p class="small">${prodTag(s.producto)} · ${esc(s.tipo_credito || '')} · ${s.reestructura ? '<b>Reestructura</b> (no se mide tiempo) · ' : ''}Ingresó al DAC ${fh(s.ingreso_dac)} · Estado actual: ${esc(s.estado_actual || '—')}<br>
-          Tiempo de la solicitud: <b>${dur(g && g.segundos)}</b> · le queda a <b>${esc(titulo(g && g.analista))}</b> · De la creación a la última decisión: ${dur(s.segundos_total)}</p>
+        cuerpo = `<p class="small">${prodTag(s.producto)} · ${esc(s.tipo_credito || '')} · ${s.reestructura ? '<b>Reestructura</b> (no se mide tiempo) · ' : ''}Ingresó al DAC ${fh(s.ingreso_dac)} · Estado hoy: ${esc(s.ultimo_estado || s.estado_actual || '—')}<br>
+          Tiempo de la solicitud: <b>${dur(g && g.segundos)}</b> (meta ${metas()[s.producto]} min) · le queda a <b>${esc(titulo(g && g.analista))}</b> · De la creación a la última decisión: ${dur(s.segundos_total)}</p>
           <div class="tabla"><table><thead><tr><th>#</th><th>Tipo</th><th>Analista</th><th>Inicio</th><th>Fin</th><th>Termina en</th><th class="num">Tiempo</th><th>Detalle por estado (reloj · jornada)</th></tr></thead><tbody>
           ${tr.map((t) => `<tr><td>${t.n}</td><td>${t.tipo === 'analisis' ? 'Análisis' : 'Preaprobado condicionado'}</td><td>${esc(titulo(t.analista))}</td><td>${fh(t.inicio)}</td><td>${fh(t.fin)}</td><td>${esc(t.fin_estado)}</td><td class="num"><b>${dur(S.C.segundosTramo(t))}</b></td>
             <td class="small">${Object.entries(t.estados || {}).map(([e, v]) => `${esc(e)}: ${dur(v[0])} · ${dur(v[1])}`).join('<br>')}</td></tr>`).join('')}</tbody></table></div>`;
       }
     }
-    return `<div class="card"><div class="cabeza"><h3>Detalle de una solicitud</h3>
+    return `<div class="card" id="detalleSol"><div class="cabeza"><h3>Detalle de una solicitud</h3>
       <form class="form" data-form="buscar" style="margin:0"><input name="q" placeholder="N.º de solicitud" value="${esc(S.buscar)}" inputmode="numeric"><button class="btn sec">Ver</button></form></div>${cuerpo}</div>`;
   }
 
+  // Un caso de reprocesamiento por solicitud: suma del tiempo EN ANALISIS de todos sus tramos de preaprobado
+  const filaReproceso = (r) => {
+    const s = S.C.solPorId.get(r.solicitud) || {};
+    return { solicitud: r.solicitud, producto: s.producto, tipo_credito: s.tipo_credito, tipo: `Preaprobado condicionado (${r.tramos.length} ${r.tramos.length === 1 ? 'tramo' : 'tramos'})`,
+      analista: r.analista, inicio: r.inicio, fin: r.fin, fin_estado: r.fin_estado, segundos: r.s, estado_hoy: s.ultimo_estado || s.estado_actual };
+  };
   function reproceso() {
     const [d, h] = rangoMes(S.mes);
-    const C = S.C, meta = Number(C.cfg.meta_minutos), yo = soloYo();
-    const tr = DAC.tramosPeriodo(C, S.D, 'reproceso', d, h, filtroDatos()).filter((t) => !yo || t.analista === yo);
-    const grupos = agrupar(tr, (t) => t.analista, C.segundosTramo).map((g) => ({ nombre: nombreAnalista(g.k), valores: g.valores }));
-    const abiertos = S.D.tramos.filter((t) => t.tipo === 'reproceso' && !t.fin).length;
+    const C = S.C, yo = soloYo();
+    const casos = DAC.reprocesos(C, S.D, d, h, filtroDatos()).filter((r) => !yo || r.analista === yo);
+    const grupos = agrupar(casos, (r) => r.analista, (r) => r).map((g) => ({ nombre: nombreAnalista(g.k), valores: g.valores, filas: g.valores.map(filaReproceso) }));
+    const ids = new Set(S.D.tramos.filter((t) => t.tipo === 'reproceso' && !t.fin).map((t) => t.solicitud));
+    const abiertos = [...ids].filter((id) => C.solPorId.has(id)).map((id) => C.reprocesoDe(id)).filter((r) => r && (!yo || r.analista === yo));
+    const porFin = new Map();
+    for (const r of casos) porFin.set(r.fin_estado, [...(porFin.get(r.fin_estado) || []), r]);
     return `${filtros()}
       <div class="card"><h3>Reprocesamiento · Preaprobado condicionado · ${mesTxt(S.mes)}</h3>
-        <p class="muted small">Desde que la solicitud queda en PREAPROBADO CONDICIONADO hasta que el analista que la retoma la aprueba o rechaza. El reprocesamiento se le asigna a ese analista; la solicitud conserva el tiempo y el caso del analista que la dejó preaprobada.</p>
-        ${notaTiempos()}${abiertos ? `<div class="nota">${abiertos} solicitudes siguen en preaprobado condicionado (esperando al promotor); se medirán cuando se resuelvan.</div>` : ''}
-        ${tablaTiempos(grupos, meta)}</div>`;
+        <p class="muted small">Un caso por solicitud: desde que queda en PREAPROBADO CONDICIONADO hasta la decisión (aprobado, rechazado o TUD). Solo cuenta el tiempo <b>EN ANALISIS</b>: mientras la solicitud está en preaprobado condicionado esperando al promotor, el tiempo se detiene; los preaprobados anteriores sí suman lo que estuvo en análisis.
+          Todo el reprocesamiento queda a nombre de <b>${esc(titulo(S.D.config.analista_reproceso || '—'))}</b> (perfil Analista con reprocesamiento). La solicitud conserva el tiempo y el caso del analista que la dejó preaprobada.
+          Tiempo en ${S.C.cfg.modo_tiempo === 'jornada' ? 'horas hábiles' : 'hora reloj'}; meta según el producto (${metaTxt()}). Se cuenta en el mes en que empezó el reprocesamiento.</p>
+        ${abiertos.length ? `<div class="nota">${conLista(abiertos.length, 'Siguen en preaprobado condicionado', abiertos.map(filaReproceso))} solicitudes siguen en preaprobado condicionado; se medirán cuando haya una decisión.</div>` : ''}
+        ${tablaTiempos(grupos, 'Analista', 'Preaprobado condicionado')}
+        <p class="small" style="margin-top:10px"><b>¿Cómo terminan?</b> ${[...porFin].sort((a, b) => b[1].length - a[1].length).map(([e, l]) => `${esc(e)}: ${conLista(l.length, `Preaprobado condicionado que termina en ${esc(e)}`, l.map(filaReproceso))}`).join(' · ')}</p></div>`;
+  }
+
+  // ---------- Flujo Rápido y motor ----------
+  // No cuenta en los tiempos ni en la productividad del DAC: es un bot. Meta del motor: resolver en 1 minuto.
+  const CAMINO = { dac: 'Pasó al DAC', rapido: 'Flujo Rápido', otro: 'Se quedó en el motor' };
+  const segs = (v) => (v == null || !isFinite(v) ? '—' : `${v.toFixed(1)} s`);
+  const filaFlujo = (x) => ({ solicitud: x.solicitud, producto: x.producto, tipo_credito: x.tipo_credito, tipo: 'Flujo Rápido', inicio: x.creada,
+    fin: x.fecha_resolucion, fin_estado: x.resolucion, segundos: x.seg_motor, metaSeg: 60, estado_hoy: x.ultimo_estado || x.estado_actual });
+  function motor() {
+    const [d, h] = rangoMes(S.mes);
+    const C = S.C;
+    const deP = (x) => !S.producto || x.producto === S.producto;
+    const MR = S.D.motor_resumen.filter((r) => r.fecha >= d && r.fecha <= h && deP(r));
+    const fr = flujoEn(d, h).filter(deP);
+    const lentas = S.D.motor_lentas.filter((x) => x.fecha_resolucion && x.fecha_resolucion.slice(0, 10) >= d && x.fecha_resolucion.slice(0, 10) <= h && deP(x));
+    const suma = (l, k) => l.reduce((t, r) => t + Number(r[k] || 0), 0);
+    const res = (l) => { const n = suma(l, 'n'); return { n, prom: n ? suma(l, 'seg_total') / n : null, max: l.length ? Math.max(...l.map((r) => Number(r.seg_max))) : null,
+      b: ['b10', 'b20', 'b30', 'b60', 'bmas'].map((k) => suma(l, k)), dentro: n ? (n - suma(l, 'bmas')) / n : null }; };
+    const T = res(MR);
+    const filaM = (nom, l) => { const x = res(l); return `<tr><td>${nom}</td><td class="num">${n0(x.n)}</td>${x.b.map((v) => `<td class="num">${v ? n0(v) : '·'}</td>`).join('')}<td class="num">${segs(x.prom)}</td><td class="num">${segs(x.max)}</td><td class="num"><b>${pct(x.dentro)}</b></td></tr>`; };
+    const cab = '<tr><th></th><th class="num">Resoluciones</th><th class="num">≤ 10 s</th><th class="num">10–20 s</th><th class="num">20–30 s</th><th class="num">30–60 s</th><th class="num">Más de 1 min</th><th class="num">Promedio</th><th class="num">Máximo</th><th class="num">≤ 1 min</th></tr>';
+    const porDia = new Map();
+    for (const r of MR) porDia.set(r.fecha, [...(porDia.get(r.fecha) || []), r]);
+    const dias = [...DAC.dias(d, h > C.hoy ? C.hoy : h)].map((f) => { const x = res(porDia.get(f) || []);
+      return { x: Number(f.slice(8)), y: x.prom || 0, tip: `${f.slice(8)}/${f.slice(5, 7)} · ${n0(x.n)} resoluciones<br>Promedio ${segs(x.prom)} · máximo ${segs(x.max)}<br>Más de 1 min: ${n0(x.b[4])}` }; });
+    const porEstado = new Map();
+    for (const x of fr) porEstado.set(x.ultimo_estado, [...(porEstado.get(x.ultimo_estado) || []), x]);
+    const sinDatos = !S.D.motor_resumen.length;
+    return `${filtros({ tipo: false })}
+      ${sinDatos ? '<div class="card nota alerta">Los tiempos del motor se llenan con la próxima actualización, después de ejecutar <b>supabase/migracion_2026_10_23b.sql</b> en Supabase.</div>' : ''}
+      <div class="kpis">
+        <div class="kpi"><div class="l">Resoluciones del motor</div><div class="v">${n0(T.n)}</div><div class="s">aprobado o rechazado por motor · ${mesTxt(S.mes)}</div></div>
+        <div class="kpi ${T.dentro == null || T.dentro >= 0.999 ? 'verde' : 'naranja'}"><div class="l">Dentro de 1 minuto</div><div class="v">${pct(T.dentro)}</div><div class="s">${n0(T.b[4])} tardaron más de 1 min</div></div>
+        <div class="kpi cielo"><div class="l">Tiempo promedio</div><div class="v">${segs(T.prom)}</div><div class="s">de ENVIADO a la resolución · máximo ${segs(T.max)}</div></div>
+        <div class="kpi blanco"><div class="l">Flujo Rápido</div><div class="v">${n0(fr.length)}</div><div class="s">resolución del motor que siguió sin pasar por un analista</div></div>
+      </div>
+      <div class="card"><h3>Tiempo promedio del motor por día</h3><p class="muted small" style="margin-top:-4px">Segundos de ENVIADO a APROBADO / RECHAZADO POR MOTOR. Meta: menos de 1 minuto. No cuenta en los tiempos ni en la productividad del DAC.</p>
+        ${GRAF.columnas(dias, { fmt: (v) => `${(+v).toFixed(1)}`, color: 'var(--navy)' })}</div>
+      <div class="grid g2" style="margin-top:14px">
+        <div class="card"><h3>Por camino</h3><div class="tabla"><table><thead>${cab}</thead><tbody>
+          ${Object.entries(CAMINO).map(([k, t]) => filaM(t, MR.filter((r) => r.camino === k))).join('')}
+          ${['APROBADO POR MOTOR', 'RECHAZADO POR MOTOR'].map((e) => filaM(titulo(e), MR.filter((r) => r.resolucion === e))).join('')}</tbody></table></div></div>
+        <div class="card"><h3>Por producto</h3><div class="tabla"><table><thead>${cab}</thead><tbody>
+          ${DAC.PRODUCTOS.map((p) => filaM(prodTag(p), MR.filter((r) => r.producto === p))).join('')}</tbody></table></div></div>
+      </div>
+      <div class="card"><h3>Resoluciones de más de 1 minuto</h3>
+        ${lentas.length ? `<div class="tabla"><table><thead><tr><th>Solicitud</th><th>Producto</th><th>Resolución</th><th>Camino</th><th>Fecha</th><th class="num">Segundos</th></tr></thead><tbody>
+          ${lentas.sort((a, b) => b.segundos - a.segundos).map((x) => `<tr><td>${x.solicitud}</td><td>${prodTag(x.producto)}</td><td>${esc(x.resolucion)}</td><td>${CAMINO[x.camino] || ''}</td><td>${fh(x.fecha_resolucion)}</td><td class="num"><b>${segs(Number(x.segundos))}</b></td></tr>`).join('')}</tbody></table></div>`
+          : '<p class="muted">Ninguna resolución del motor pasó de 1 minuto en el mes.</p>'}</div>
+      <div class="card"><h3>Flujo Rápido · ${mesTxt(S.mes)}</h3>
+        <p class="muted small">Solicitudes con APROBADO o RECHAZADO POR MOTOR que siguieron a otro estado sin pasar por POR ASIGNAR A ANALISTA (también si la jefatura las pasó a pre análisis). Clic en una cantidad para ver las solicitudes.</p>
+        <p>${['APROBADO POR MOTOR', 'RECHAZADO POR MOTOR'].map((e) => { const l = fr.filter((x) => x.resolucion === e); return `${titulo(e)}: <b>${conLista(l.length, `Flujo Rápido · ${titulo(e)}`, l.map(filaFlujo))}</b>`; }).join(' · ')}
+          · Total: <b>${conLista(fr.length, 'Flujo Rápido', fr.map(filaFlujo))}</b></p>
+        <div class="tabla"><table><thead><tr><th>Estado hoy</th><th class="num">Solicitudes</th><th class="num">%</th></tr></thead><tbody>
+          ${[...porEstado].sort((a, b) => b[1].length - a[1].length).map(([e, l]) => `<tr><td>${esc(e)}</td><td class="num">${conLista(l.length, `Flujo Rápido · ${esc(e)}`, l.map(filaFlujo))}</td><td class="num">${pct(l.length / fr.length)}</td></tr>`).join('')}</tbody></table></div></div>`;
+  }
+
+  // ---------- Ciclo de la solicitud (gerente) ----------
+  // De la creación hasta FORMALIZADO (de cara al cliente) o hasta que se rechaza, va a TUD, se anula, etc.
+  // Cada estado es de un departamento (tabla del DAC); los estados sin departamento son de quien pasó la solicitud a ese estado.
+  const AREA = { 'ANALISTA ASIGNADO': 'Analista', APROBADO: 'Supervisor DAC', 'APROBADO ASALARIADO': 'Comercial', 'APROBADO POR ANALISTA': 'Analista',
+    'APROBADO POR MOTOR': 'Motor', AUDITADO: 'Auditor', 'DEVUELTO GERENCIA': 'Comercial', 'EN ANALISIS': 'Analista', 'EN ESTUDIO': 'Comercial',
+    ENVIADO: 'Comercial', FORMALIZADO: 'Comercial', PENDIENTES: 'Comercial', 'POR ASIGNAR A ANALISTA': 'Supervisor DAC', 'PRE ANALISIS': 'Comercial',
+    'PREAPROBADO CONDICIONADO': 'Analista', RECHAZADO: 'Supervisor DAC', 'RECHAZADO POR ANALISTA': 'Analista', 'RECHAZADO POR ASESOR': 'Comercial',
+    'RECHAZADO POR MOTOR': 'Motor', 'RECHAZADO POR RECEPCION': 'Analista', 'RECHAZADO RESOLUCION': 'Gerente', 'RESOLUCION APROBADA': 'Gerente',
+    REVISADO: 'Auditor', 'REVISION APROBADOR': 'Analista', 'VERIFICADOR MOTORIZADO': 'Motorizado' };
+  const area = (e) => AREA[e] || (e.startsWith('EXPEDIENTE') ? 'Auditor' : 'Según quién la pasó a ese estado');
+  function ciclo() {
+    const { P, L } = periodoDash();
+    const d = P.desde, h = P.hasta, esMes = S.dgran === 'mes', nomP = esMes ? mesTxt(S.mes) : P.nom;
+    const med = S.cmed || (S.C.cfg.modo_tiempo === 'jornada' ? 'jornada' : 'reloj'), k = med === 'jornada' ? 1 : 0;
+    const enP = (f) => f && f.slice(0, 10) >= d && f.slice(0, 10) <= h;
+    const base = [...S.D.solicitudes.map((s) => ({ c: 'dac', s })), ...S.D.fueraDeMes.map((s) => ({ c: 'dac', s })), ...S.D.flujo_rapido.map((s) => ({ c: 'rapido', s }))]
+      .filter((x) => x.s.ciclo && enP(x.s.creada) && (S.camino === 'todas' || x.c === S.camino) && (!S.producto || x.s.producto === S.producto)
+        && (S.cfin === 'todas' || (S.cfin === 'final') === !!x.s.ciclo.final));
+    const it = base.map((x) => {
+      let tot = 0, dac = 0, com = 0;
+      for (const [key, v] of Object.entries(x.s.ciclo.est || {})) { const t = v[k]; tot += t; if (key.endsWith('|DAC')) dac += t; else com += t; }
+      return { ...x, tot, dac, com };
+    });
+    const sinDatos = ![...S.D.solicitudes, ...S.D.flujo_rapido].some((s) => s.ciclo);
+    const resumen = (l) => { const v = l.map((x) => x.tot).sort((a, b) => a - b), n = v.length, sd = l.reduce((t, x) => t + x.dac, 0), sc = l.reduce((t, x) => t + x.com, 0);
+      return { n, med: n ? v[Math.floor((n - 1) / 2)] : null, prom: n ? (sd + sc) / n : null, dac: n ? sd / n : null, com: n ? sc / n : null, pdac: sd + sc ? sd / (sd + sc) : null }; };
+    const fila = (x) => ({ solicitud: x.s.solicitud, producto: x.s.producto, tipo_credito: x.s.tipo_credito, tipo: x.c === 'dac' ? 'DAC' : 'Flujo Rápido', inicio: x.s.creada,
+      fin: x.s.ciclo.t_fin, fin_estado: x.s.ciclo.final ? x.s.ciclo.fin : `${x.s.ciclo.fin} (en proceso)`, segundos: x.tot, dac: x.dac, com: x.com, metaSeg: null,
+      estado_hoy: x.s.ultimo_estado || x.s.estado_actual });
+    const R = resumen(it);
+    // Por semana (mes) o por mes: reparto del tiempo entre DAC y Comercial
+    const diasP = [...DAC.dias(d, h)];
+    const claves = esMes ? [...new Set(diasP.map((f) => `W${DAC.semanaMes(f)}`))] : mesesEntre(d, h);
+    const grupoDe = (x) => (esMes ? `W${DAC.semanaMes(x.s.creada)}` : x.s.creada.slice(0, 7));
+    const tipC = (nom, r) => `<b>${nom}</b><br>${n0(r.n)} solicitudes<br>Promedio: ${dur(r.prom)}<br>DAC: ${dur(r.dac)} · Comercial: ${dur(r.com)}`;
+    const graf = claves.map((g) => { const l = it.filter((x) => grupoDe(x) === g), r = resumen(l);
+      return { x: esMes ? g : MES3[Number(g.slice(5)) - 1], partes: [r.dac || 0, r.com || 0], tip: tipC(esMes ? g : mesTxt(g), r), clic: esMes ? null : `mes:${g}` }; });
+    graf.push({ x: 'Total', total: true, partes: [R.dac || 0, R.com || 0], tip: tipC(`Total ${nomP}`, R) });
+    const filaR = (nom, l) => { const r = resumen(l); return `<tr><td>${nom}</td><td class="num">${conLista(r.n, `Ciclo · ${nom.replace(/<[^>]+>/g, '')}`, l.map(fila))}</td><td class="num">${dur(r.med)}</td><td class="num">${dur(r.prom)}</td>
+      <td class="num">${dur(r.dac)}</td><td class="num">${dur(r.com)}</td><td class="num"><b>${pct(r.pdac)}</b></td><td class="num">${r.pdac == null ? '—' : pct(1 - r.pdac)}</td></tr>`; };
+    const cabR = '<tr><th></th><th class="num">Solicitudes</th><th class="num">Mediana</th><th class="num">Promedio</th><th class="num">Promedio DAC</th><th class="num">Promedio Comercial</th><th class="num">% DAC</th><th class="num">% Comercial</th></tr>';
+    // Por estado
+    const est = new Map();
+    for (const x of it) for (const [key, v] of Object.entries(x.s.ciclo.est || {})) {
+      const e = est.get(key) || { t: 0, l: [] };
+      e.t += v[k]; e.l.push(x); est.set(key, e);
+    }
+    const totalT = [...est.values()].reduce((a, e) => a + e.t, 0);
+    const seg = (clave, ops) => `<div class="seg">${ops.map(([v, t]) => `<button data-set="${clave}:${v}" class="${S[clave] === v || (clave === 'cmed' && med === v) ? 'on' : ''}">${t}</button>`).join('')}</div>`;
+    const segP = `<div class="seg">${[['mes', 'Mensual'], ['trimestre', 'Trimestral'], ['semestre', 'Semestral'], ['anio', 'Anual']].map(([g, t]) => `<button data-dgran="${g}" class="${S.dgran === g ? 'on' : ''}">${t}</button>`).join('')}</div>`;
+    const selP = `<select data-f="dper">${L.map((x) => `<option value="${x.desde}" ${x.desde === P.desde ? 'selected' : ''}>${S.dgran === 'mes' ? mesTxt(x.desde.slice(0, 7)) : x.nom}</option>`).join('')}</select>`;
+    return `
+      <div class="filtros"><label>Período${segP}</label><label>&nbsp;${selP}</label>
+        <label>Producto<select data-f="producto"><option value="">Todos</option>${DAC.PRODUCTOS.map((p) => `<option ${p === S.producto ? 'selected' : ''}>${p}</option>`).join('')}</select></label>
+        <label>Camino${seg('camino', [['todas', 'Todas'], ['dac', 'DAC'], ['rapido', 'Flujo Rápido']])}</label>
+        <label>Solicitudes${seg('cfin', [['final', 'Finalizadas'], ['proceso', 'En proceso'], ['todas', 'Todas']])}</label>
+        <label>Medida${seg('cmed', [['jornada', 'Horas hábiles'], ['reloj', 'Hora reloj']])}</label>
+        <button class="btn sec" data-act="bajarCiclo">⬇ Descargar Excel</button></div>
+      ${sinDatos ? '<div class="card nota alerta">El ciclo de cada solicitud se llena con la próxima actualización, después de ejecutar <b>supabase/migracion_2026_10_23b.sql</b> en Supabase.</div>' : ''}
+      <div class="card"><h3>Ciclo de la solicitud · ${nomP}</h3>
+        <p class="muted small">De la creación de la solicitud hasta que se <b>formaliza</b> (de cara al cliente; lo posterior, como revisado, expedientes y auditado, no cuenta) o hasta que se rechaza, va a TUD o se anula. Las <i>en proceso</i> se miden hasta la última actualización.
+          El tiempo de cada estado es del departamento responsable; los estados sin departamento fijo (TUD, anulado, aprobado informa, creación de nuevo ID, vencido) son de quien pasó la solicitud a ese estado. Solicitudes del DAC y del Flujo Rápido, por fecha de creación. Medido en ${med === 'jornada' ? 'horas hábiles' : 'hora reloj'}.</p>
+        <div class="kpis">
+          <div class="kpi"><div class="l">Solicitudes</div><div class="v">${conLista(R.n, 'Ciclo de la solicitud', it.map(fila))}</div><div class="s">${S.cfin === 'final' ? 'finalizadas' : S.cfin === 'proceso' ? 'en proceso' : 'finalizadas y en proceso'}</div></div>
+          <div class="kpi cielo"><div class="l">Duración mediana</div><div class="v">${dur(R.med)}</div><div class="s">promedio ${dur(R.prom)}</div></div>
+          <div class="kpi verde"><div class="l">DAC</div><div class="v">${pct(R.pdac)}</div><div class="s">del tiempo · promedio ${dur(R.dac)} por solicitud</div></div>
+          <div class="kpi naranja"><div class="l">Comercial</div><div class="v">${R.pdac == null ? '—' : pct(1 - R.pdac)}</div><div class="s">del tiempo · promedio ${dur(R.com)} por solicitud</div></div>
+        </div>
+        ${GRAF.apiladas(graf, [{ nombre: 'DAC', color: 'var(--navy)' }, { nombre: 'Comercial', color: 'var(--naranja)' }])}</div>
+      <div class="card"><h3>Por producto y camino</h3><div class="tabla"><table><thead>${cabR}</thead><tbody>
+        ${DAC.PRODUCTOS.map((p) => filaR(prodTag(p), it.filter((x) => x.s.producto === p))).join('')}
+        ${[['dac', 'Pasó por el DAC'], ['rapido', 'Flujo Rápido']].map(([c, t]) => filaR(t, it.filter((x) => x.c === c))).join('')}
+        <tr class="total"><td>Total</td><td class="num">${n0(R.n)}</td><td class="num">${dur(R.med)}</td><td class="num">${dur(R.prom)}</td><td class="num">${dur(R.dac)}</td><td class="num">${dur(R.com)}</td><td class="num">${pct(R.pdac)}</td><td class="num">${R.pdac == null ? '—' : pct(1 - R.pdac)}</td></tr></tbody></table></div></div>
+      <div class="card"><h3>¿En qué estados se va el tiempo?</h3>
+        <div class="tabla"><table><thead><tr><th>Estado</th><th>Departamento</th><th>Quién</th><th class="num">Solicitudes que pasaron</th><th class="num">Tiempo promedio en el estado</th><th class="num">% del tiempo total</th></tr></thead><tbody>
+        ${[...est].sort((a, b) => b[1].t - a[1].t).map(([key, e]) => { const [es, dp] = key.split('|'); return `<tr><td>${esc(es)}</td><td>${dp === 'DAC' ? 'DAC' : 'Comercial'}</td><td class="small">${area(es)}</td>
+          <td class="num">${conLista(e.l.length, `Pasaron por ${es} (${dp})`, e.l.map(fila))}</td><td class="num">${dur(e.t / e.l.length)}</td><td class="num"><b>${pct(totalT ? e.t / totalT : null)}</b></td></tr>`; }).join('') || '<tr><td colspan="6" class="muted">Sin datos</td></tr>'}
+        </tbody></table></div></div>`;
+  }
+  async function bajarCiclo() {
+    const k = (S.cmed || (S.C.cfg.modo_tiempo === 'jornada' ? 'jornada' : 'reloj')) === 'jornada' ? 1 : 0;
+    const { P } = periodoDash();
+    const enP = (f) => f && f.slice(0, 10) >= P.desde && f.slice(0, 10) <= P.hasta;
+    const filas = [...S.D.solicitudes.map((s) => ['DAC', s]), ...S.D.fueraDeMes.map((s) => ['DAC', s]), ...S.D.flujo_rapido.map((s) => ['Flujo Rápido', s])]
+      .filter(([, s]) => s.ciclo && enP(s.creada)).map(([c, s]) => {
+        const o = { Solicitud: s.solicitud, Camino: c, Producto: s.producto, 'Tipo de crédito': s.tipo_credito, Creada: s.creada, Fin: s.ciclo.t_fin,
+          'Último estado del ciclo': s.ciclo.fin, Finalizada: s.ciclo.final ? 'Sí' : 'No', 'Total (h)': 0, 'DAC (h)': 0, 'Comercial (h)': 0 };
+        for (const [key, v] of Object.entries(s.ciclo.est || {})) {
+          const hrs = v[k] / 3600;
+          o['Total (h)'] += hrs; o[key.endsWith('|DAC') ? 'DAC (h)' : 'Comercial (h)'] += hrs;
+          o[`${key.replace('|', ' · ')} (h)`] = Math.round(hrs * 100) / 100;
+        }
+        for (const c2 of ['Total (h)', 'DAC (h)', 'Comercial (h)']) o[c2] = Math.round(o[c2] * 100) / 100;
+        return o;
+      });
+    await excel(`Ciclo de la solicitud ${P.nom}`, { Solicitudes: filas });
   }
 
   // ---------- Productividad ----------
@@ -287,6 +650,7 @@
     const C = S.C, M = DAC.metricas(C, S.D, d, h, filtroDatos()), yo = soloYo();
     const filas = M.porAnalista.filter((a) => !yo || a.nombre === yo).sort((a, b) => (b.prod || 0) - (a.prod || 0));
     const ausentes = (nom) => (S.D.ausencias || []).filter((a) => a.analista === nom && a.hasta >= d && a.desde <= h).length;
+
     return `${filtros()}
       <div class="card"><h3>Productividad por analista · ${mesTxt(S.mes)}</h3>
         <p class="muted small">${notaHoy(M)} Cada solicitud cuenta para cada analista que intervino en ella (aunque sea de otro producto). Días disponibles = días hábiles − vacaciones/permisos + eventos especiales asignados.</p>
@@ -303,22 +667,22 @@
   // ---------- Departamento (global) ----------
   function global() {
     const [d, h] = rangoMes(S.mes);
-    const C = S.C, M = DAC.metricas(C, S.D, d, h, { tipo: S.tipo }), meta = Number(C.cfg.meta_minutos);
-    const tiempoProd = (p) => DAC.resumenTiempos(M.sols.filter((s) => !s.reestructura && (!p || s.producto === p)).map((s) => C.global(s)).filter(Boolean).map((g) => g.segundos), meta);
-    const fila = (nom, x, R, peso, cls = '') => `<tr class="${cls}"><td>${nom}</td><td class="num">${n0(x.n)}</td><td class="num">${pct(peso)}</td><td class="num">${n2(M.depto.diasHabiles)}</td><td class="num">${n2(x.porDia)}</td>
-      <td class="num">${x.analistas}</td><td class="num">${n2(x.equiv)}</td><td class="num"><b>${n2(x.prod)}</b></td><td class="num">${dur(R.mediana)}</td><td class="num">${pct(R.enMeta)}</td></tr>`;
+    const C = S.C, M = DAC.metricas(C, S.D, d, h, { tipo: S.tipo });
+    const tiempoProd = (p) => DAC.resumenTiempos(casosDe(C, M.sols.filter((s) => !p || s.producto === p)), metas());
+    const fila = (nom, x, R, peso, cls = '', meta = 'según producto') => `<tr class="${cls}"><td>${nom}</td><td class="num">${n0(x.n)}</td><td class="num">${pct(peso)}</td><td class="num">${n2(M.depto.diasHabiles)}</td><td class="num">${n2(x.porDia)}</td>
+      <td class="num">${x.analistas}</td><td class="num">${n2(x.equiv)}</td><td class="num"><b>${n2(x.prod)}</b></td><td class="num">${dur(R.mediana)}</td><td class="num">${meta}</td><td class="num">${pct(R.enMeta)}</td></tr>`;
     return `${filtros({ producto: false })}
       <div class="card"><h3>Departamento de Análisis · ${mesTxt(S.mes)}</h3>
         <p class="muted small">${notaHoy(M)}</p>
         <div class="nota">Productividad del producto = solicitudes del producto que pasaron por POR ASIGNAR A ANALISTA ÷ días hábiles ÷ analistas del producto
           (contados por su disponibilidad: si alguien tuvo vacaciones, cuenta solo por los días que estuvo).
           Productividad del departamento = promedio de la productividad de cada producto, ponderado por su peso en solicitudes.</div>
-        <div class="tabla"><table><thead><tr><th>Producto</th><th class="num">Solicitudes</th><th class="num">Peso</th><th class="num">Días hábiles</th><th class="num">Solicitudes por día</th><th class="num">Analistas</th><th class="num">Analistas disponibles</th><th class="num">Productividad</th><th class="num">Tiempo mediano</th><th class="num">≤ ${meta} min</th></tr></thead><tbody>
-        ${DAC.PRODUCTOS.map((p) => fila(prodTag(p), M.porProducto[p], tiempoProd(p), M.depto.peso[p])).join('')}
+        <div class="tabla"><table><thead><tr><th>Producto</th><th class="num">Solicitudes</th><th class="num">Peso</th><th class="num">Días hábiles</th><th class="num">Solicitudes por día</th><th class="num">Analistas</th><th class="num">Analistas disponibles</th><th class="num">Productividad</th><th class="num">Tiempo mediano</th><th class="num">Meta</th><th class="num">En meta</th></tr></thead><tbody>
+        ${DAC.PRODUCTOS.map((p) => fila(prodTag(p), M.porProducto[p], tiempoProd(p), M.depto.peso[p], '', `≤ ${metas()[p]} min`)).join('')}
         ${fila('Departamento', M.depto, tiempoProd(null), 1, 'total')}</tbody></table></div>
         <p class="muted small">Incluye ${n0(M.depto.reestructuras)} reestructuras (cuentan para productividad; no para tiempos).</p></div>
       <div class="card"><h3>Distribución del tiempo de la solicitud por producto</h3>${notaTiempos()}
-        ${tablaTiempos(DAC.PRODUCTOS.map((p) => ({ nombre: prodTag(p), valores: M.sols.filter((s) => !s.reestructura && s.producto === p).map((s) => C.global(s)).filter(Boolean).map((g) => g.segundos) })), meta, 'Producto')}</div>`;
+        ${tablaTiempos(DAC.PRODUCTOS.map((p) => { const cs = casosDe(C, M.sols.filter((s) => s.producto === p)); return { nombre: prodTag(p), valores: cs, filas: cs.map((g) => filaTramo(g.tramo)) }; }), 'Producto', 'Tiempo de la solicitud')}</div>`;
   }
 
   // ---------- Acumulado ----------
@@ -336,14 +700,16 @@
     return out;
   }
   function acumulado() {
-    const C = S.C, meta = Number(C.cfg.meta_minutos), yo = soloYo();
+    const C = S.C, yo = soloYo();
     const anios = [...new Set([Number(INICIO.slice(0, 4)), new Date().getFullYear()])];
     for (let y = anios[0]; y <= new Date().getFullYear(); y++) if (!anios.includes(y)) anios.push(y);
     const P = periodos(S.gran, S.anio);
     const filas = P.map((p) => {
       const M = DAC.metricas(C, S.D, p.desde, p.hasta, filtroDatos());
-      const T = DAC.resumenTiempos(M.sols.filter((s) => !s.reestructura).map((s) => C.global(s)).filter(Boolean).map((g) => g.segundos), meta);
-      return { ...p, M, T };
+      const cs = casosDe(C, M.sols);
+      const T = DAC.resumenTiempos(cs, metas());
+      const TP = Object.fromEntries(DAC.PRODUCTOS.map((x) => [x, DAC.resumenTiempos(cs.filter((c) => c.p === x), metas())]));
+      return { ...p, M, T, TP };
     });
     const seg = `<div class="seg">${[['mes', 'Mensual'], ['trimestre', 'Trimestral'], ['semestre', 'Semestral'], ['anio', 'Anual']].map(([k, t]) => `<button data-gran="${k}" class="${S.gran === k ? 'on' : ''}">${t}</button>`).join('')}</div>`;
     const selAnio = `<label>Año<select data-f="anio">${anios.sort().map((y) => `<option ${y === S.anio ? 'selected' : ''}>${y}</option>`).join('')}</select></label>`;
@@ -353,19 +719,179 @@
     const serie = (nom, color, f) => ({ nombre: nom, color, puntos: filas.map((r) => ({ x: r.nom, y: f(r) })) });
     const an = C.analistas.filter((a) => !yo || a.nombre === yo);
     const prodA = filas.map((r) => new Map(r.M.porAnalista.map((a) => [a.nombre, a])));
+    // Total del año (o de lo que va del año) para cada analista
+    const MT = filas.length > 1 ? DAC.metricas(C, S.D, filas[0].desde, filas[filas.length - 1].hasta, filtroDatos()) : null;
+    const totA = MT ? new Map(MT.porAnalista.map((a) => [a.nombre, a])) : null;
     return `${cabeza}
       <div class="card"><h3>Productividad acumulada</h3>
         ${yo ? GRAF.lineas([serie('Mi productividad', 'var(--s-pers)', (r) => r.M.porAnalista.find((a) => a.nombre === yo)?.prod ?? null), serie('Departamento', 'var(--s-pymes)', (r) => r.M.depto.prod)], { fmt: n2 })
           : GRAF.lineas(S.producto ? [serie(S.producto, COLOR[S.producto], (r) => r.M.porProducto[S.producto].prod)]
             : [serie('Departamento', 'var(--navy)', (r) => r.M.depto.prod), ...DAC.PRODUCTOS.map((p) => serie(p, COLOR[p], (r) => r.M.porProducto[p].prod))], { fmt: n2 })}
         <div class="tabla" style="margin-top:10px"><table><thead><tr><th>Período</th><th class="num">Solicitudes</th><th class="num">Días hábiles</th><th class="num">Analistas disp.</th><th class="num">Productividad</th>
-          ${DAC.PRODUCTOS.map((p) => `<th class="num">${p}</th>`).join('')}<th class="num">Tiempo mediano</th><th class="num">≤ ${meta} min</th></tr></thead><tbody>
+          ${DAC.PRODUCTOS.map((p) => `<th class="num">${p}</th><th class="num" data-tip="Solicitudes ${p} dentro de su meta">≤ ${metas()[p]} min</th>`).join('')}<th class="num">Tiempo mediano</th><th class="num">En meta</th></tr></thead><tbody>
           ${filas.map((r) => `<tr><td>${r.nom}</td><td class="num">${n0(r.M.depto.n)}</td><td class="num">${n2(r.M.depto.diasHabiles)}</td><td class="num">${n2(r.M.depto.equiv)}</td><td class="num"><b>${n2(r.M.depto.prod)}</b></td>
-            ${DAC.PRODUCTOS.map((p) => `<td class="num">${n2(r.M.porProducto[p].prod)}</td>`).join('')}<td class="num">${dur(r.T.mediana)}</td><td class="num">${pct(r.T.enMeta)}</td></tr>`).join('')}
+            ${DAC.PRODUCTOS.map((p) => `<td class="num">${n2(r.M.porProducto[p].prod)}</td><td class="num" data-tip="${n0(r.TP[p].n)} solicitudes con tiempo medido">${pct(r.TP[p].enMeta)}</td>`).join('')}<td class="num">${dur(r.T.mediana)}</td><td class="num">${pct(r.T.enMeta)}</td></tr>`).join('')}
           </tbody></table></div></div>
-      <div class="card"><h3>Productividad por analista</h3><div class="tabla"><table><thead><tr><th>Analista</th>${filas.map((r) => `<th class="num">${r.nom}</th>`).join('')}</tr></thead><tbody>
-        ${an.map((a) => `<tr><td>${esc(titulo(a.nombre))} <span class="muted small">${a.producto}</span></td>${prodA.map((m) => { const x = m.get(a.nombre); return `<td class="num" data-tip="${x ? `${x.n} solicitudes / ${n2(x.disp)} días` : ''}">${n2(x && x.prod)}</td>`; }).join('')}</tr>`).join('')}
+      <div class="card"><h3>Productividad por analista</h3><div class="tabla"><table><thead><tr><th>Analista</th>${filas.map((r) => `<th class="num">${r.nom}</th>`).join('')}${MT ? `<th class="num">Total ${S.anio}</th>` : ''}</tr></thead><tbody>
+        ${an.map((a) => `<tr><td>${esc(titulo(a.nombre))} <span class="muted small">${a.producto}</span></td>${[...prodA, ...(totA ? [totA] : [])].map((m, i) => { const x = m.get(a.nombre); const b = i === prodA.length; return `<td class="num" data-tip="${x ? `${x.n} solicitudes / ${n2(x.disp)} días` : ''}">${b ? '<b>' : ''}${n2(x && x.prod)}${b ? '</b>' : ''}</td>`; }).join('')}</tr>`).join('')}
       </tbody></table></div></div>`;
+  }
+
+  // ---------- Cartera actual ----------
+  // Lo que tiene cada analista y lo que está en cola, según la última actualización
+  const POR_ASIGNAR = 'POR ASIGNAR A ANALISTA';
+  const horasDesde = (f) => (f ? (Date.now() - new Date(f)) / 3600000 : null);
+  const espera = (f) => { const x = horasDesde(f); return x == null ? '—' : x < 1 ? `${Math.round(x * 60)} min` : x < 48 ? `${n2(x)} h` : `${n2(x / 24)} días`; };
+  function cartera() {
+    const C = S.C, yo = soloYo();
+    const ult = S.D.config.ultima_actualizacion;
+    if (!S.D.solicitudes.some((s) => s.ultimo_estado)) return `<div class="card nota alerta">La cartera actual necesita el estado en que está hoy cada solicitud. Se llena en la próxima actualización, después de ejecutar <b>supabase/migracion_2026_10_23.sql</b> en Supabase.</div>`;
+    // Último tramo abierto de cada solicitud: a quién le está quedando
+    const abiertos = new Map();
+    for (const t of S.D.tramos) {
+      if (t.fin || !C.solPorId.has(t.solicitud)) continue;
+      const a = abiertos.get(t.solicitud);
+      if (!a || t.n > a.n) abiertos.set(t.solicitud, t);
+    }
+    const fila = (s, t) => ({ solicitud: s.solicitud, producto: s.producto, tipo_credito: s.tipo_credito, tipo: t ? (t.tipo === 'analisis' ? 'Análisis' : 'Preaprobado condicionado') : 'En cola',
+      analista: t && t.analista, inicio: t ? t.inicio : s.ingreso_dac, fin_estado: '', estado_hoy: `${s.ultimo_estado} desde ${fh(s.ultimo_cambio)} (${espera(s.ultimo_cambio)})` });
+    const cola = S.D.solicitudes.filter((s) => s.ultimo_estado === POR_ASIGNAR).sort((a, b) => String(a.ultimo_cambio).localeCompare(String(b.ultimo_cambio)));
+    const porAn = new Map();
+    for (const [id, t] of abiertos) {
+      const s = C.solPorId.get(id);
+      if (s.ultimo_estado === POR_ASIGNAR) continue;
+      const k = t.analista || (t.tipo === 'reproceso' ? 'PREAPROBADO CONDICIONADO · ESPERANDO AL PROMOTOR' : '(SIN ANALISTA)');
+      if (yo && k !== yo) continue;
+      if (!porAn.has(k)) porAn.set(k, []);
+      porAn.get(k).push({ s, t });
+    }
+    const COLS = ['ANALISTA ASIGNADO', 'EN ANALISIS', 'PENDIENTES', 'PREAPROBADO CONDICIONADO'];
+    const filasAn = [...porAn].sort((a, b) => b[1].length - a[1].length);
+    const celda = (nom, l, est) => { const x = est === null ? l : est === '' ? l.filter((o) => !COLS.includes(o.s.ultimo_estado)) : l.filter((o) => o.s.ultimo_estado === est);
+      return `<td class="num">${x.length ? conLista(x.length, `${titulo(nom)}${est ? ` · ${est}` : ''}`, x.map((o) => fila(o.s, o.t))) : '·'}</td>`; };
+    const todos = filasAn.flatMap(([, l]) => l);
+    return `
+      <div class="cabeza"><div><h2>Cartera actual</h2><div class="muted small">Según la última actualización: <b>${fh(ult)}</b>. Para ver el estado de este momento, pulse Actualizar y espere a que termine.</div></div>
+        <div><button class="btn" data-act="actualizar">⟳ Actualizar</button><div class="estado-act muted" id="estadoAct"></div></div></div>
+      <div class="kpis">
+        <div class="kpi"><div class="l">En cola</div><div class="v">${n0(cola.length)}</div><div class="s">POR ASIGNAR A ANALISTA${cola.length ? ` · la más antigua espera ${espera(cola[0].ultimo_cambio)}` : ''}</div></div>
+        <div class="kpi verde"><div class="l">Con analista</div><div class="v">${n0(todos.filter((o) => o.t.analista).length)}</div><div class="s">asignadas, en análisis o en pendientes</div></div>
+        <div class="kpi naranja"><div class="l">Preaprobado condicionado</div><div class="v">${n0(todos.filter((o) => o.s.ultimo_estado === 'PREAPROBADO CONDICIONADO').length)}</div><div class="s">esperando al promotor o en reproceso</div></div>
+      </div>
+      <div class="card"><h3>Solicitudes que tiene cada analista</h3>
+        <p class="muted small">Solicitudes del DAC que el analista tiene abiertas (asignada y todavía sin decisión), con el estado en que están hoy. Clic en una cantidad para ver las solicitudes. Las de meses anteriores ya se cerraron al corte de su mes y no aparecen.</p>
+        <div class="tabla"><table><thead><tr><th>Analista</th><th class="num">Total</th>${COLS.map((c) => `<th class="num">${titulo(c)}</th>`).join('')}<th class="num">Otros estados</th></tr></thead><tbody>
+        ${filasAn.map(([k, l]) => `<tr><td>${S.C.esAnalista.has(k) ? nombreAnalista(k) : esc(titulo(k))}</td>${celda(k, l, null)}${COLS.map((c) => celda(k, l, c)).join('')}${celda(k, l, '')}</tr>`).join('') || '<tr><td colspan="7" class="muted">Ninguna solicitud abierta</td></tr>'}
+        ${filasAn.length > 1 ? `<tr class="total"><td>Total</td>${celda('Total', todos, null)}${COLS.map((c) => celda('Total', todos, c)).join('')}${celda('Total', todos, '')}</tr>` : ''}</tbody></table></div></div>
+      <div class="card"><h3>En cola · POR ASIGNAR A ANALISTA</h3>
+        <div class="tabla"><table><thead><tr><th>Solicitud</th><th>Producto</th><th>Tipo de crédito</th><th>Ingresó al DAC</th><th>En cola desde</th><th class="num">Esperando</th><th>Promotor</th><th>Sucursal</th></tr></thead><tbody>
+        ${cola.map((s) => `<tr><td><button class="lnk" data-ver="${s.solicitud}">${s.solicitud}</button></td><td>${prodTag(s.producto)}</td><td>${esc(s.tipo_credito || '')}</td><td>${fh(s.ingreso_dac)}</td><td>${fh(s.ultimo_cambio)}</td>
+          <td class="num"><b>${espera(s.ultimo_cambio)}</b></td><td class="small">${esc(titulo(s.promotor || ''))}</td><td class="small">${esc(s.sucursal || '')}</td></tr>`).join('') || '<tr><td colspan="8" class="muted">No hay solicitudes en cola</td></tr>'}</tbody></table></div></div>`;
+  }
+
+  // ---------- Capacidad instalada ----------
+  const COLOCADO = (e) => ['AUDITADO', 'APROBADO INFORMA', 'REVISADO', 'FORMALIZADO'].includes(e) || e.startsWith('EXPEDIENTE');
+  const BASES = { mes: ['Mes anterior', 1], trimestre: ['Trimestre anterior (3 meses)', 3], semestre: ['Semestre anterior (6 meses)', 6] };
+  function capInicial() {
+    const g = S.D.config.capacidad || {};
+    const hoy = new Date();
+    return { mes: g.mes || DAC.iso(new Date(hoy.getFullYear(), hoy.getMonth() + 1, 1)).slice(0, 7), presupuesto: g.presupuesto ?? '',
+      pct: g.pct || {}, base: g.base || 'trimestre', util: g.util ?? 100 };
+  }
+  function calcCapacidad(cap) {
+    const C = S.C;
+    const [y, m] = cap.mes.split('-').map(Number), nb = BASES[cap.base][1];
+    const base = Array.from({ length: nb }, (_, i) => DAC.iso(new Date(y, m - 1 - nb + i, 1)).slice(0, 7));
+    const bd = `${base[0]}-01`, bh = rangoMes(base[base.length - 1])[1];
+    const M = DAC.metricas(C, S.D, bd, bh);
+    const BR = S.D.bitacora_resumen.filter((r) => base.includes(r.periodo));
+    const [td, th] = rangoMes(cap.mes);
+    const dhT = C.diasHabilesTotales(td, th);
+    let horasT = 0, horasB = 0;
+    for (const f of DAC.dias(td, th)) horasT += C.horasDia(f);
+    for (const f of DAC.dias(bd, bh)) horasB += C.horasDia(f);
+    const hDiaB = horasB / (C.diasHabilesTotales(bd, bh) || 1);
+    const util = Number(cap.util || 100) / 100;
+    const suma = (l, f = (r) => r.n) => l.reduce((t, r) => t + Number(f(r)), 0);
+    const montoTot = suma(BR.filter((r) => COLOCADO(r.estado)), (r) => r.monto_aprobado);
+    const prods = DAC.PRODUCTOS.map((p) => {
+      const rows = BR.filter((r) => r.producto === p), col = rows.filter((r) => COLOCADO(r.estado));
+      const nCol = suma(col), montoCol = suma(col, (r) => r.monto_aprobado);
+      const sols = M.sols.filter((s) => s.producto === p);
+      // Tiempo por solicitud: el del caso más el preaprobado condicionado (no los reprocesos entre analistas)
+      const t = sols.filter((s) => !s.reestructura).map((s) => { const g = C.global(s); if (!g || g.segundos == null) return null;
+        return g.segundos + (C.tramosPorSol.get(s.solicitud) || []).filter((x) => x.tipo === 'reproceso').reduce((a, x) => a + (C.segundosTramo(x) || 0), 0); }).filter((x) => x != null);
+      const tReal = t.length ? t.reduce((a, b) => a + b, 0) / t.length : null;
+      const x = M.porProducto[p];
+      const r = { p, ingresaron: suma(rows), nCol, montoCol, ticket: nCol ? montoCol / nCol : null,
+        colDac: suma(col.filter((r0) => r0.camino === 'dac')), colRapido: suma(col.filter((r0) => r0.camino === 'rapido')),
+        tud: suma(rows.filter((r0) => r0.estado.startsWith('TUD'))), rech: suma(rows.filter((r0) => r0.estado.startsWith('RECHAZADO') && r0.estado !== 'RECHAZADO POR MOTOR')),
+        rechMotor: suma(rows.filter((r0) => r0.estado === 'RECHAZADO POR MOTOR')), dacN: x.n, tReal, prodHist: x.prod,
+        usoReal: tReal != null && x.disp ? (x.n * tReal) / (x.disp * hDiaB * 3600) : null,
+        pctHist: montoTot ? montoCol / montoTot : null, actuales: x.analistas, meta: metas()[p] };
+      r.porColocado = nCol ? r.dacN / nCol : null;
+      const pctP = cap.pct[p] === '' || cap.pct[p] == null ? r.pctHist : Number(cap.pct[p]) / 100;
+      r.pct = pctP;
+      r.montoMeta = cap.presupuesto !== '' && pctP != null ? Number(cap.presupuesto) * pctP : null;
+      r.creditos = r.montoMeta != null && r.ticket ? r.montoMeta / r.ticket : null;
+      r.solic = r.creditos != null && r.porColocado != null ? r.creditos * r.porColocado : null;
+      r.porDia = r.solic != null && dhT ? r.solic / dhT : null;
+      r.aProd = r.porDia != null && r.prodHist ? r.porDia / r.prodHist : null;
+      r.aReal = r.solic != null && r.tReal != null && horasT ? (r.solic * r.tReal) / (horasT * 3600 * util) : null;
+      r.aMeta = r.solic != null && horasT ? (r.solic * r.meta * 60) / (horasT * 3600 * util) : null;
+      return r;
+    });
+    return { base, bd, bh, M, BR, dhT, horasT, prods };
+  }
+  function capacidad() {
+    if (!S.cap) S.cap = capInicial();
+    const cap = S.cap, K = calcCapacidad(cap);
+    const tot = (k) => K.prods.reduce((t, r) => (r[k] == null ? t : t + r[k]), 0);
+    const algun = (k) => K.prods.some((r) => r[k] != null);
+    const sumaPct = DAC.PRODUCTOS.reduce((t, p) => t + Number(cap.pct[p] || 0), 0);
+    const dif = (r) => { if (r.aProd == null) return '—'; const v = r.aProd - r.actuales; return Math.abs(v) < 0.05 ? 'justo' : v > 0 ? `<span style="color:var(--rojo)">faltan ${n2(v)}</span>` : `<span style="color:var(--verde-osc)">sobran ${n2(-v)}</span>`; };
+    const sinBit = !K.BR.length;
+    const baseTxt = K.base.map(mesTxt).join(', ');
+    const fila = (r, nom, cls = '') => `<tr class="${cls}"><td>${nom}</td><td class="num">${n0(r.ingresaron)}</td><td class="num">${n0(r.nCol)}</td><td class="num">${n0(r.colRapido)}</td><td class="num">${n2(r.ticket)}</td>
+      <td class="num">${n0(r.tud)}</td><td class="num">${n0(r.rech)}</td><td class="num">${n0(r.rechMotor)}</td><td class="num">${n0(r.dacN)}</td><td class="num">${n2(r.porColocado)}</td>
+      <td class="num">${dur(r.tReal)}</td><td class="num">${n2(r.prodHist)}</td><td class="num">${pct(r.usoReal)}</td></tr>`;
+    const T = { ingresaron: tot('ingresaron'), nCol: tot('nCol'), colRapido: tot('colRapido'), tud: tot('tud'), rech: tot('rech'), rechMotor: tot('rechMotor'), dacN: tot('dacN') };
+    T.ticket = T.nCol ? tot('montoCol') / T.nCol : null; T.porColocado = T.nCol ? T.dacN / T.nCol : null;
+    const fila2 = (r, nom, cls = '') => `<tr class="${cls}"><td>${nom}</td><td class="num">${r.pct == null ? '—' : pct(r.pct)}</td><td class="num">${n2(r.montoMeta)}</td><td class="num">${n0(r.creditos)}</td><td class="num">${n0(r.solic)}</td><td class="num">${n2(r.porDia)}</td>
+      <td class="num"><b>${n2(r.aProd)}</b></td><td class="num">${n2(r.aReal)}</td><td class="num">${n2(r.aMeta)}</td><td class="num">${r.actuales ?? '—'}</td><td class="num">${r.dif ?? dif(r)}</td></tr>`;
+    const T2 = { pct: algun('pct') ? tot('pct') : null, montoMeta: algun('montoMeta') ? tot('montoMeta') : null, creditos: algun('creditos') ? tot('creditos') : null, solic: algun('solic') ? tot('solic') : null,
+      porDia: algun('porDia') ? tot('porDia') : null, aProd: algun('aProd') ? tot('aProd') : null, aReal: algun('aReal') ? tot('aReal') : null, aMeta: algun('aMeta') ? tot('aMeta') : null, actuales: tot('actuales') };
+    T2.dif = dif(T2);
+    return `
+      <div class="card"><h3>Capacidad instalada del departamento</h3>
+        <p class="muted small">Con el presupuesto de colocación del mes y la historia del período base, calcula cuántas solicitudes van a llegar al DAC y cuántos analistas se necesitan por producto.</p>
+        <form class="form" data-form="capacidad">
+          <label>Mes a planificar<input type="month" name="mes" value="${cap.mes}" required></label>
+          <label>Presupuesto de colocación del mes<input type="number" name="presupuesto" value="${cap.presupuesto}" min="0" step="any" placeholder="Monto" style="width:170px"></label>
+          ${DAC.PRODUCTOS.map((p) => { const r = K.prods.find((x) => x.p === p); return `<label>% ${p}<input type="number" name="pct_${p}" value="${cap.pct[p] ?? ''}" min="0" max="100" step="any" style="width:80px" placeholder="${r.pctHist == null ? '' : (100 * r.pctHist).toFixed(1)}"></label>`; }).join('')}
+          <label>Calcular con<select name="base">${Object.entries(BASES).map(([k, [t]]) => `<option value="${k}" ${cap.base === k ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+          <label data-tip="Parte de la jornada que un analista dedica a analizar. Solo afecta el cálculo por tiempo.">% de la jornada analizando<input type="number" name="util" value="${cap.util}" min="1" max="100" style="width:80px"></label>
+          <button class="btn">Calcular y guardar</button></form>
+        ${sumaPct && Math.abs(sumaPct - 100) > 0.01 ? `<div class="nota alerta">Los porcentajes por producto suman ${n2(sumaPct)}%, no 100%.</div>` : ''}
+        <p class="muted small">Si deja vacío el % de un producto se usa su peso histórico en el monto colocado del período base (el número en gris). Período base: <b>${baseTxt}</b>. Mes a planificar: ${n2(K.dhT)} días hábiles, ${n2(K.horasT)} horas de jornada.</p>
+        ${sinBit ? `<div class="nota alerta">No hay datos de la bitácora para ${baseTxt}. Se llenan con la actualización, después de ejecutar la migración del 23-oct en Supabase y la carga del histórico.</div>` : ''}</div>
+      <div class="card"><h3>Lo que pasó en el período base · ${baseTxt}</h3>
+        <div class="tabla"><table><thead><tr><th>Producto</th><th class="num" data-tip="Todos los créditos creados (bitácora)">Ingresaron</th><th class="num" data-tip="Auditado, Aprobado Informa, Expediente…, Revisado, Formalizado">Colocados</th>
+          <th class="num" data-tip="Colocados sin pasar por un analista">Por Flujo Rápido</th><th class="num" data-tip="Monto aprobado promedio de los colocados">Ticket promedio</th><th class="num">TUD</th><th class="num" data-tip="Rechazado por analista, recepción, resolución, asesor…">Rechazados</th><th class="num">Rechazados por motor</th>
+          <th class="num" data-tip="Solicitudes que pasaron por POR ASIGNAR A ANALISTA">Solicitudes DAC</th><th class="num" data-tip="Solicitudes DAC por cada crédito colocado">DAC por colocado</th>
+          <th class="num" data-tip="Promedio del tiempo del caso más el preaprobado condicionado (sin los reprocesos entre analistas)">Tiempo por solicitud</th><th class="num">Productividad</th>
+          <th class="num" data-tip="Horas de análisis medidas ÷ horas de jornada disponibles de los analistas del producto">Uso de la jornada</th></tr></thead><tbody>
+          ${K.prods.map((r) => fila(r, prodTag(r.p))).join('')}${fila({ ...T, tReal: null, prodHist: K.M.depto.prod, usoReal: null }, 'Departamento', 'total')}</tbody></table></div></div>
+      <div class="card"><h3>Analistas necesarios · ${mesTxt(cap.mes)}</h3>
+        <div class="tabla"><table><thead><tr><th>Producto</th><th class="num">% del presupuesto</th><th class="num">Monto a colocar</th><th class="num">Créditos a colocar</th><th class="num">Solicitudes DAC</th><th class="num">Por día hábil</th>
+          <th class="num" data-tip="Solicitudes por día ÷ productividad histórica del producto">Analistas (productividad)</th><th class="num" data-tip="Horas de análisis con el tiempo real ÷ horas de jornada de un analista">Analistas (tiempo real)</th>
+          <th class="num" data-tip="Horas de análisis si cada solicitud tomara su meta ÷ horas de jornada de un analista">Analistas (tiempo meta)</th><th class="num">Analistas actuales</th><th class="num">Diferencia</th></tr></thead><tbody>
+          ${K.prods.map((r) => fila2(r, prodTag(r.p))).join('')}${fila2(T2, 'Departamento', 'total')}</tbody></table></div>
+        <div class="nota"><b>Cómo se calcula</b> (por producto):<br>
+          Créditos a colocar = presupuesto × % del producto ÷ ticket promedio.<br>
+          Solicitudes DAC = créditos a colocar × solicitudes DAC por cada crédito colocado en el período base (incluye las que terminan en TUD o rechazadas, y descuenta las colocadas por Flujo Rápido).<br>
+          <b>Analistas (productividad)</b> = solicitudes por día hábil ÷ productividad histórica del producto: es la capacidad instalada con el ritmo real de trabajo. La diferencia se mide contra esta columna.<br>
+          Analistas (tiempo real / meta) = solicitudes × tiempo por solicitud ÷ (horas de jornada del mes × % de la jornada analizando). La columna <i>Uso de la jornada</i> muestra qué parte de la jornada se fue en análisis medido en el período base.</div></div>`;
   }
 
   // ---------- Vacaciones y calendario ----------
@@ -477,7 +1003,7 @@
             ${estados.map((e) => `<label><input type="checkbox" name="estados_excluidos" value="${esc(e)}" ${(cfg.estados_excluidos || []).includes(e) ? 'checked' : ''}>${esc(e)}</label>`).join('')}</div>
             <div class="form"><label>Jornada L-V<span><input type="time" name="lv0" value="${cfg.jornada.lv[0]}"> a <input type="time" name="lv1" value="${cfg.jornada.lv[1]}"></span></label>
               <label>Sábado<span><input type="time" name="sab0" value="${cfg.jornada.sab[0]}"> a <input type="time" name="sab1" value="${cfg.jornada.sab[1]}"></span></label>
-              <label>Meta (min)<input type="number" name="meta_minutos" value="${cfg.meta_minutos}" min="1" style="width:80px"></label>
+              ${DAC.PRODUCTOS.map((p) => `<label>Meta ${p} (min)<input type="number" name="meta_${p}" value="${cfg.metas[p]}" min="1" style="width:80px"></label>`).join('')}
               <label>Actualizar solo cada (min)<input type="number" name="cada_minutos" value="${S.D.config.cada_minutos ?? 60}" min="0" style="width:90px"></label></div></div>
         </div><button class="btn" data-act="guardarConfig">Guardar parámetros</button>
         <p class="muted small">La jornada también la usa el proceso de actualización para medir en horas de jornada; un cambio aplica desde la siguiente actualización.</p></div>
@@ -501,28 +1027,44 @@
       </tbody></table></div></div>`;
   }
 
-  const VISTAS = { dashboard, tiempos, reproceso, productividad, acumulado, global, calendario, admin: administracion };
+  const VISTAS = { dashboard, tiempos, reproceso, cartera, productividad, acumulado, global, motor, ciclo, capacidad, calendario, admin: administracion };
 
   // ---------- Eventos ----------
   async function guardar(tabla, fila) { await API.guardar(tabla, fila); await recargar(); }
   async function recargar() {
-    const D = await API.cargar();
-    D.config = Object.fromEntries((D.config || []).map((c) => [c.clave, c.valor]));
-    S.D = D; recalcular(); vista();
+    S.D = preparar(await API.cargar()); recalcular(); vista();
   }
 
   app.addEventListener('change', (e) => {
     const f = e.target.dataset.f;
     if (!f) return;
     S[f] = f === 'anio' ? Number(e.target.value) : e.target.value;
+    if (f === 'dper' && S.dgran === 'mes') S.mes = e.target.value.slice(0, 7);
     vista();
   });
 
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && MODAL) cerrarLista(); });
   app.addEventListener('click', async (e) => {
+    const cerrar = e.target.closest('[data-cerrar]');
+    if (cerrar && (cerrar === e.target || cerrar.tagName === 'BUTTON')) { cerrarLista(); return; }
+    const g = e.target.closest('[data-clic]');
+    if (g) { // clic en un mes de un gráfico: el dashboard pasa a ese mes
+      const [k, v] = g.dataset.clic.split(':');
+      if (k === 'mes') { S.dgran = 'mes'; S.mes = v; vista(); }
+      return;
+    }
     const b = e.target.closest('button');
     if (!b) return;
     try {
       if (b.dataset.tab) { S.tab = b.dataset.tab; pintar(); return; }
+      if (b.dataset.dgran) { S.dgran = b.dataset.dgran; S.dper = null; vista(); return; }
+      if (b.dataset.set) { const [k, v] = b.dataset.set.split(':'); S[k] = v; vista(); return; }
+      if (b.dataset.casos) { const l = LISTAS[Number(b.dataset.casos)]; abrirLista(l.titulo, l.filas); return; }
+      if (b.dataset.ver) {
+        S.buscar = b.dataset.ver; S.tab = 'tiempos'; cerrarLista(); pintar();
+        const el = $('#detalleSol'); if (el) el.scrollIntoView({ behavior: 'smooth' });
+        return;
+      }
       if (b.dataset.vista) { S.vista = b.dataset.vista; vista(); return; }
       if (b.dataset.gran) { S.gran = b.dataset.gran; vista(); return; }
       if (b.dataset.cal) { S.calMes = b.dataset.cal; vista(); return; }
@@ -536,6 +1078,9 @@
       if (act === 'salir') { await API.salir(); S.perfil = null; login(); }
       else if (act === 'clave') cambiarClave();
       else if (act === 'actualizar') { b.disabled = true; await pedirActualizacion(); b.disabled = false; }
+      else if (act === 'bajarModal') await excel(MODAL.titulo.replace(/[\\/:*?"<>|]/g, ' '), { Detalle: MODAL.filas.map(xlsFila) });
+      else if (act === 'bajarCiclo') { b.disabled = true; try { await bajarCiclo(); } finally { b.disabled = false; } }
+      else if (act === 'bajarTiempos') { b.disabled = true; try { await bajarTiempos(); } finally { b.disabled = false; } }
       else if (act === 'feriados') {
         const y = S.calMes.slice(0, 4);
         const prop = DAC.feriadosPropuestos(Number(y)).filter((f) => !(S.D.feriados || []).some((x) => x.fecha === f.fecha));
@@ -553,7 +1098,7 @@
           { clave: 'modo_tiempo', valor: $('[name=modo_tiempo]:checked', m).value },
           { clave: 'estados_excluidos', valor: $$('[name=estados_excluidos]:checked', m).map((x) => x.value) },
           { clave: 'jornada', valor: { lv: [val('lv0'), val('lv1')], sab: [val('sab0'), val('sab1')] } },
-          { clave: 'meta_minutos', valor: Number(val('meta_minutos')) },
+          { clave: 'metas', valor: Object.fromEntries(DAC.PRODUCTOS.map((p) => [p, Number(val(`meta_${p}`))])) },
           { clave: 'cada_minutos', valor: Number(val('cada_minutos')) },
         ];
         await guardar('dac_config', filas);
@@ -561,6 +1106,7 @@
       } else if (act === 'guardarUsuario') {
         const tr = b.closest('tr');
         await API.editarUsuario(tr.dataset.usuario, $('[name=rol]', tr).value, $('[name=analista]', tr).value, $('[name=activo]', tr).checked);
+        await analistaReproceso($('[name=rol]', tr).value, $('[name=analista]', tr).value);
         usuariosCache = null; vista();
       } else if (act === 'restablecer') {
         if (confirm('¿Restablecer la contraseña a 12345678?')) { await API.restablecer(b.closest('tr').dataset.usuario); alert('Contraseña restablecida a 12345678.'); }
@@ -576,6 +1122,14 @@
     try {
       switch (form.dataset.form) {
         case 'buscar': S.buscar = o.q.trim(); vista(); break;
+        case 'capacidad': {
+          S.cap = { mes: o.mes, presupuesto: o.presupuesto, base: o.base, util: Number(o.util) || 100,
+            pct: Object.fromEntries(DAC.PRODUCTOS.map((p) => [p, o[`pct_${p}`]])) };
+          vista();
+          await API.guardar('dac_config', { clave: 'capacidad', valor: S.cap });
+          S.D.config.capacidad = S.cap;
+          break;
+        }
         case 'ausencia':
           if (o.hasta < o.desde) throw new Error('La fecha final es anterior a la inicial');
           await guardar('dac_ausencias', { analista: o.analista, desde: o.desde, hasta: o.hasta, tipo: o.tipo, medio_dia: !!o.medio_dia, nota: o.nota || null });
@@ -599,11 +1153,19 @@
         }
         case 'usuario':
           await API.crearUsuario(o.nombre.trim(), o.rol, o.analista);
+          await analistaReproceso(o.rol, o.analista);
           usuariosCache = null; vista(); alert(`Usuario creado. Ingresa con "${o.nombre.trim()}" y la contraseña 12345678.`);
           break;
       }
     } catch (err) { aviso(err); }
   });
+
+  // El perfil "Analista con reprocesamiento" define a nombre de quién queda el preaprobado condicionado
+  async function analistaReproceso(rol, analista) {
+    if (rol !== 'reproceso' || !analista || analista === S.D.config.analista_reproceso) return;
+    await API.guardar('dac_config', { clave: 'analista_reproceso', valor: analista });
+    await recargar();
+  }
 
   function cambiarClave() {
     const actual = prompt('Contraseña actual:');

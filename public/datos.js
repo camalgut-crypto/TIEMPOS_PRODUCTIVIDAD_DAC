@@ -7,6 +7,9 @@
   const local = !CFG.SUPABASE_URL || !CFG.SUPABASE_ANON_KEY || new URLSearchParams(location.search).has('local');
   const TABLAS = ['dac_analistas', 'dac_feriados', 'dac_horarios', 'dac_ausencias', 'dac_eventos', 'dac_config', 'dac_actualizaciones'];
   const LLAVE = { dac_analistas: 'nombre', dac_feriados: 'fecha', dac_horarios: 'fecha', dac_config: 'clave' };
+  // Tablas de la migración del 23-oct: si todavía no existen, la app sigue funcionando sin ellas
+  const OPCIONALES = { flujo_rapido: ['dac_flujo_rapido', 'solicitud'], bitacora_resumen: ['dac_bitacora_resumen', 'periodo'],
+    motor_resumen: ['dac_motor_resumen', 'fecha'], motor_lentas: ['dac_motor_lentas', 'solicitud'] };
 
   // ---------- Supabase ----------
   const sb = local ? null : window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY);
@@ -45,6 +48,9 @@
         ...TABLAS.map((t) => todo(t, LLAVE[t] || 'id'))]);
       const D = { solicitudes, tramos };
       TABLAS.forEach((t, i) => { D[t.slice(4)] = resto[i]; });
+      await Promise.all(Object.entries(OPCIONALES).map(async ([k, [t, o]]) => {
+        try { D[k] = await todo(t, o); } catch (e) { console.warn(`${t}: ${e.message}`); D[k] = []; }
+      }));
       return D;
     },
     async guardar(tabla, fila) {
@@ -83,7 +89,7 @@
       { nombre: 'Karen Arana', rol: 'gerente' },
     ];
     const an = ls.get('dac_analistas', null) || (await analistasSemilla());
-    return ls.get('usuarios', null) || base.concat(an.map((a) => ({ nombre: titulo(a.nombre), rol: 'analista', analista: a.nombre })))
+    return ls.get('usuarios', null) || base.concat(an.map((a) => ({ nombre: titulo(a.nombre), rol: a.nombre.startsWith('LILIANA') ? 'reproceso' : 'analista', analista: a.nombre })))
       .map((u) => ({ id: DAC.slug(u.nombre), usuario: DAC.slug(u.nombre), activo: true, analista: null, ...u }));
   }
   const titulo = (s) => s.toLowerCase().replace(/(^|\s)\S/g, (c) => c.toUpperCase());
@@ -121,7 +127,8 @@
     },
     async cargar() {
       const d = await datosLocales();
-      const D = { solicitudes: d.solicitudes, tramos: d.tramos };
+      const D = { solicitudes: d.solicitudes, tramos: d.tramos, flujo_rapido: d.flujo_rapido || [], bitacora_resumen: d.bitacora_resumen || [],
+        motor_resumen: d.motor_resumen || [], motor_lentas: d.motor_lentas || [] };
       D.analistas = ls.get('dac_analistas', null) || (await analistasSemilla());
       D.feriados = ls.get('dac_feriados', null) || DAC.feriadosPropuestos(new Date().getFullYear());
       D.horarios = ls.get('dac_horarios', []);
@@ -129,6 +136,7 @@
       D.eventos = ls.get('dac_eventos', []);
       D.config = ls.get('dac_config', null) || [];
       D.config = D.config.concat([{ clave: 'ultima_actualizacion', valor: d.ultima_actualizacion }]);
+      if (!D.config.some((c) => c.clave === 'analista_reproceso')) D.config.push({ clave: 'analista_reproceso', valor: 'LILIANA ARGENTINA LOPEZ MENDIETA' });
       D.actualizaciones = ls.get('dac_actualizaciones', []);
       return D;
     },
