@@ -226,12 +226,13 @@
   const flujoEn = (d, h) => S.D.flujo_rapido.filter((x) => x.creada && x.creada.slice(0, 10) >= d && x.creada.slice(0, 10) <= h);
 
   // Filtro del dashboard al hacer clic en un día, una hora, una celda del mapa o una semana: "fil|desde|hasta|hora"
-  const filClic = (d1, d2, hora) => `fil|${d1 || ''}|${d2 || ''}|${hora ?? ''}`;
+  const filClic = (d1, d2, hora, analista = S.dfiltro && S.dfiltro.analista) => `fil|${d1 || ''}|${d2 || ''}|${hora ?? ''}|${analista || ''}`;
   function textoFiltro(F) {
     const dia = (f) => `${Number(f.slice(8))} ${MES3[Number(f.slice(5, 7)) - 1].toLowerCase()}`;
     const p = [];
     if (F.d1) p.push(F.d1 === F.d2 ? dia(F.d1) : `${dia(F.d1)} – ${dia(F.d2)}`);
     if (F.hora != null) p.push(`${F.hora}:00 a ${F.hora}:59`);
+    if (F.analista) p.push(titulo(F.analista));
     return p.join(' · ');
   }
 
@@ -242,18 +243,21 @@
     const F = S.dfiltro && S.dfiltro.per === `${S.dgran}:${P.desde}` ? S.dfiltro : (S.dfiltro = null);
     const d = (F && F.d1) || P.desde, h = (F && F.d2) || P.hasta;
     const deHora = (f) => !F || F.hora == null || (!!f && Number(f.slice(11, 13)) === F.hora);
-    const filtro = { pred: (s) => deHora(s.ingreso_dac) };
+    // Analista elegido: solicitudes en que intervino (cualquier tramo)
+    const delAnalista = F && F.analista ? new Set(S.D.tramos.filter((t) => t.analista === F.analista).map((t) => t.solicitud)) : null;
+    const deAnalista = (s) => !delAnalista || delAnalista.has(s.solicitud);
+    const filtro = { pred: (s) => deHora(s.ingreso_dac) && deAnalista(s) };
     const C = S.C, M = DAC.metricas(C, S.D, d, h, filtro);
     const casos = casosDe(C, M.sols);
     const T = DAC.resumenTiempos(casos, metas());
     const R = DAC.resumenTiempos(DAC.reprocesos(C, S.D, d, h, filtro), metas());
-    const fr = flujoEn(d, h).filter((x) => deHora(x.creada));
+    const fr = delAnalista ? [] : flujoEn(d, h).filter((x) => deHora(x.creada));
     const hastaHoy = P.hasta > C.hoy ? C.hoy : P.hasta;
     const nomP = esMes ? mesTxt(S.mes) : P.nom;
 
     // Flujo de ingresos: día (o mes) en el eje horizontal, hora de ingreso al DAC en el vertical. Siempre del período
     // completo, para poder elegir un día, una hora o una celda y filtrar el resto del dashboard.
-    const solsP = S.D.solicitudes.filter((s) => s.ingreso_dac.slice(0, 10) >= P.desde && s.ingreso_dac.slice(0, 10) <= P.hasta);
+    const solsP = S.D.solicitudes.filter((s) => s.ingreso_dac.slice(0, 10) >= P.desde && s.ingreso_dac.slice(0, 10) <= P.hasta && deAnalista(s));
     const cols = esMes ? [...DAC.dias(P.desde, hastaHoy)].map((f) => ({ k: f, d1: f, d2: f, t: Number(f.slice(8)), sub: DSEM[(DAC.fecha(f).getDay() + 6) % 7][0], nohabil: !C.valorDia(f) }))
       : mesesEntre(P.desde, hastaHoy).map((m) => ({ k: m, d1: `${m}-01`, d2: rangoMes(m)[1], t: MES3[Number(m.slice(5)) - 1], sub: '' }));
     const colDe = (s) => (esMes ? s.ingreso_dac.slice(0, 10) : s.ingreso_dac.slice(0, 7));
@@ -272,7 +276,7 @@
     const selHora = (hr) => F && F.hora === hr;
     const celda = (c, hr) => {
       const n = cnt.get(`${c.k}|${hr}`) || 0, v = n / maxC;
-      const on = (selCol(c) || !(F && F.d1)) && (selHora(hr) || !F || F.hora == null) && F ? ' on' : '';
+      const on = (selCol(c) || !(F && F.d1)) && (selHora(hr) || !F || F.hora == null) && F && (F.d1 || F.hora != null) ? ' on' : '';
       return `<td class="c${on}" style="${n ? `background:rgba(6,37,91,${(0.08 + 0.85 * v).toFixed(2)});color:${v > 0.45 ? '#fff' : 'var(--navy)'}` : ''}"
         data-clic="${filClic(c.d1, c.d2, hr)}" data-tip="${esMes ? `${Number(c.k.slice(8))}/${c.k.slice(5, 7)}` : mesTxt(c.k)} · ${hr}:00 a ${hr}:59<br><b>${n0(n)}</b> solicitudes<br><i>clic para filtrar</i>">${n || ''}</td>`;
     };
@@ -349,9 +353,10 @@
         <div class="card">${horas}</div>
         <div class="card"><h3>Tiempos de respuesta · ${F ? textoFiltro(F) : nomP}</h3><p class="muted small" style="margin-top:-4px">Tiempo de la solicitud contra la meta de su producto (${metaTxt()}).${esMes ? ' Semanas de lunes a domingo según el día de ingreso al DAC; clic en una semana para filtrar.' : ' Clic en un mes para verlo.'}</p>
           ${GRAF.apiladas(porGrupo, SERIE_META())}</div>
-        <div class="card" style="grid-column:1/-1"><h3>Productividad por analista${F ? ` · ${textoFiltro(F)}` : ''}</h3><p class="muted small" style="margin-top:-4px">Solicitudes en que intervino / días disponibles</p>
+        <div class="card" style="grid-column:1/-1"><h3>Productividad por analista${F ? ` · ${textoFiltro(F)}` : ''}</h3><p class="muted small" style="margin-top:-4px">Solicitudes en que intervino / días disponibles. Cambia con el filtro de día y hora; clic en un analista para filtrar todo el dashboard (incluido el mapa) a sus solicitudes.</p>
           ${GRAF.barras(pa.map((a) => ({ nombre: titulo(a.nombre), y: a.prod, color: COLOR[a.producto],
-            tip: `${esc(titulo(a.nombre))} (${a.producto})<br>${a.n} solicitudes / ${n2(a.disp)} días = ${n2(a.prod)}` })), { fmt: n2 })}
+            tip: `${esc(titulo(a.nombre))} (${a.producto})<br>${a.n} solicitudes / ${n2(a.disp)} días = ${n2(a.prod)}<br><i>clic para ${F && F.analista === a.nombre ? 'quitar el filtro del analista' : 'filtrar el dashboard por este analista'}</i>`,
+            clic: filClic(F && F.d1, F && F.d2, F && F.hora, F && F.analista === a.nombre ? '' : a.nombre), sel: F && F.analista === a.nombre })), { fmt: n2 })}
           <div class="leyenda" style="margin-top:8px">${DAC.PRODUCTOS.map((p) => `<span><i style="background:${COLOR[p]};height:10px;width:10px"></i>${p}</span>`).join('')}</div></div>
         <div class="card"><h3>Tiempos de respuesta por mes · ${anio}</h3><p class="muted small" style="margin-top:-4px">Año completo, sin el filtro de día u hora. Clic en un mes para verlo.</p>${evoT}</div>
         <div class="card"><h3>Productividad por mes · ${anio}</h3><p class="muted small" style="margin-top:-4px">Productividad del departamento, año completo. Clic en un mes para verlo.</p>${evoP}</div>
@@ -1086,10 +1091,13 @@
     if (g) {
       const v = g.dataset.clic;
       if (v.startsWith('fil|')) { // día, hora, celda o semana: filtra todo el dashboard (otro clic en lo mismo lo quita)
-        const [, d1, d2, hora] = v.split('|');
-        const nuevo = { per: `${S.dgran}:${S.dper}`, d1: d1 || null, d2: d2 || null, hora: hora === '' ? null : Number(hora) };
+        const [, d1, d2, hora, analista] = v.split('|');
+        const nuevo = { per: `${S.dgran}:${S.dper}`, d1: d1 || null, d2: d2 || null, hora: hora === '' ? null : Number(hora), analista: analista || null };
         const F = S.dfiltro;
-        S.dfiltro = F && F.per === nuevo.per && F.d1 === nuevo.d1 && F.d2 === nuevo.d2 && F.hora === nuevo.hora ? null : nuevo;
+        const igual = F && F.per === nuevo.per && F.d1 === nuevo.d1 && F.d2 === nuevo.d2 && F.hora === nuevo.hora && F.analista === nuevo.analista;
+        // otro clic en lo mismo quita ese filtro (se conserva el del analista si había uno)
+        S.dfiltro = igual ? (F.analista ? { per: F.per, d1: null, d2: null, hora: null, analista: F.analista } : null) : nuevo;
+        if (S.dfiltro && !S.dfiltro.d1 && S.dfiltro.hora == null && !S.dfiltro.analista) S.dfiltro = null;
       } else if (v.startsWith('mes:')) { S.dgran = 'mes'; S.mes = v.slice(4); } // un mes de un gráfico: el dashboard pasa a ese mes
       vista();
       return;

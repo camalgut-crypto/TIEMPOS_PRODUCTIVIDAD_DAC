@@ -80,12 +80,12 @@
     return `${ley}<div class="chart">${s}</svg></div>`;
   }
 
-  // Barras horizontales. datos: [{nombre, y, color, tip}]
+  // Barras horizontales. datos: [{nombre, y, color, tip, clic, sel}]
   function barras(datos, { fmt = corto, max } = {}) {
     const top = max || Math.max(...datos.map((d) => d.y || 0), 0) || 1;
     return `<div class="hb">${datos.map((d) => `
-      <div class="nom" title="${esc(d.nombre)}">${esc(d.nombre)}</div>
-      <div class="bar" data-tip="${esc(d.tip || `${d.nombre}: ${fmt(d.y)}`)}"><b style="width:${Math.max(0, (100 * (d.y || 0)) / top)}%;background:${d.color || 'var(--s-pers)'}"></b></div>
+      <div class="nom${d.sel ? ' sel' : ''}" title="${esc(d.nombre)}"${clic(d)}>${esc(d.nombre)}</div>
+      <div class="bar${d.sel ? ' sel' : ''}" data-tip="${esc(d.tip || `${d.nombre}: ${fmt(d.y)}`)}"${clic(d)}><b style="width:${Math.max(0, (100 * (d.y || 0)) / top)}%;background:${d.color || 'var(--s-pers)'}"></b></div>
       <div class="val">${d.y == null ? '—' : fmt(d.y)}</div>`).join('')}</div>`;
   }
 
