@@ -59,6 +59,10 @@ def procesar(cfg: dict, jornada: Jornada, personal_dac: set[str], historico: boo
         # La consulta anual viene ordenada de la más reciente a la más antigua; se invierte para que los cambios
         # con la misma hora queden en el mismo orden que en la consulta mensual.
         his = his.iloc[::-1].reset_index(drop=True)
+    # Solo los meses que traen las dos consultas: la bitácora anual llega hasta hoy y el histórico anual solo hasta el
+    # mes anterior. Si no, el mes en curso se borraría de las tablas del Flujo Rápido y del motor sin volver a cargarse.
+    meses = set(pd.to_datetime(his["FECHA CREACION"]).dt.strftime("%Y-%m"))
+    bit = bit[pd.to_datetime(bit["Fecha_creacion"]).dt.strftime("%Y-%m").isin(meses)]
     # Personal del DAC: analistas registrados, jefatura y quien registra estados del DAC (analistas anteriores, auditores)
     personal = personal_dac | usuarios_dac(his)
     sol, tr = calcular(his, bit, jornada, personal=personal)
