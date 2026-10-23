@@ -173,14 +173,15 @@ def _num(v):
 # ---------- Ciclo de la solicitud por departamento (vista del gerente) ----------
 # Departamento responsable del tiempo que la solicitud pasa en cada estado (tabla del DAC, 23-oct).
 # Los estados que no están aquí (ANULADO, APROBADO INFORMA, CREACIÓN DE NUEVO ID, TUD, VENCIDO y cualquier otro)
-# son del departamento de quien pasó la solicitud a ese estado.
+# son del departamento de quien pasó la solicitud a ese estado. Después de la resolución del motor (aprobado o
+# rechazado por motor) el seguimiento es de Comercial (indicado por el usuario 23-oct).
 DEPTO_ESTADO = {
-    **dict.fromkeys(["ANALISTA ASIGNADO", "APROBADO", "APROBADO POR ANALISTA", "APROBADO POR MOTOR", "AUDITADO",
+    **dict.fromkeys(["ANALISTA ASIGNADO", "APROBADO", "APROBADO POR ANALISTA", "AUDITADO",
                      "EN ANALISIS", "POR ASIGNAR A ANALISTA", "PREAPROBADO CONDICIONADO", "RECHAZADO",
-                     "RECHAZADO POR ANALISTA", "RECHAZADO POR MOTOR", "RECHAZADO POR RECEPCION", "RECHAZADO RESOLUCION",
+                     "RECHAZADO POR ANALISTA", "RECHAZADO POR RECEPCION", "RECHAZADO RESOLUCION",
                      "RESOLUCION APROBADA", "REVISADO", "REVISION APROBADOR", "VERIFICADOR MOTORIZADO"], "DAC"),
     **dict.fromkeys(["APROBADO ASALARIADO", "DEVUELTO GERENCIA", "EN ESTUDIO", "ENVIADO", "FORMALIZADO", "PENDIENTES",
-                     "PRE ANALISIS", "RECHAZADO POR ASESOR"], "COMERCIAL"),
+                     "PRE ANALISIS", "RECHAZADO POR ASESOR", "APROBADO POR MOTOR", "RECHAZADO POR MOTOR"], "COMERCIAL"),
 }
 # Quien registra alguno de estos estados es personal del DAC (analistas, jefatura, auditores)
 ESTADOS_DE_PERSONAL_DAC = {"ANALISTA ASIGNADO", "EN ANALISIS", "APROBADO POR ANALISTA", "RECHAZADO POR ANALISTA",

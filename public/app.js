@@ -550,10 +550,10 @@
   // De la creación hasta FORMALIZADO (de cara al cliente) o hasta que se rechaza, va a TUD, se anula, etc.
   // Cada estado es de un departamento (tabla del DAC); los estados sin departamento son de quien pasó la solicitud a ese estado.
   const AREA = { 'ANALISTA ASIGNADO': 'Analista', APROBADO: 'Supervisor DAC', 'APROBADO ASALARIADO': 'Comercial', 'APROBADO POR ANALISTA': 'Analista',
-    'APROBADO POR MOTOR': 'Motor', AUDITADO: 'Auditor', 'DEVUELTO GERENCIA': 'Comercial', 'EN ANALISIS': 'Analista', 'EN ESTUDIO': 'Comercial',
+    'APROBADO POR MOTOR': 'Comercial (seguimiento tras el motor)', AUDITADO: 'Auditor', 'DEVUELTO GERENCIA': 'Comercial', 'EN ANALISIS': 'Analista', 'EN ESTUDIO': 'Comercial',
     ENVIADO: 'Comercial', FORMALIZADO: 'Comercial', PENDIENTES: 'Comercial', 'POR ASIGNAR A ANALISTA': 'Supervisor DAC', 'PRE ANALISIS': 'Comercial',
     'PREAPROBADO CONDICIONADO': 'Analista', RECHAZADO: 'Supervisor DAC', 'RECHAZADO POR ANALISTA': 'Analista', 'RECHAZADO POR ASESOR': 'Comercial',
-    'RECHAZADO POR MOTOR': 'Motor', 'RECHAZADO POR RECEPCION': 'Analista', 'RECHAZADO RESOLUCION': 'Gerente', 'RESOLUCION APROBADA': 'Gerente',
+    'RECHAZADO POR MOTOR': 'Comercial (seguimiento tras el motor)', 'RECHAZADO POR RECEPCION': 'Analista', 'RECHAZADO RESOLUCION': 'Gerente', 'RESOLUCION APROBADA': 'Gerente',
     REVISADO: 'Auditor', 'REVISION APROBADOR': 'Analista', 'VERIFICADOR MOTORIZADO': 'Motorizado' };
   const area = (e) => AREA[e] || (e.startsWith('EXPEDIENTE') ? 'Auditor' : 'Según quién la pasó a ese estado');
   function ciclo() {
