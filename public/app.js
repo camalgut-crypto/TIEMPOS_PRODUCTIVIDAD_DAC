@@ -57,6 +57,13 @@
   const puede = (tab) => TABS.find((t) => t[0] === tab)[2].includes(S.perfil.rol);
   const soloYo = () => (['analista', 'reproceso'].includes(S.perfil.rol) ? S.perfil.analista : null);
   const aviso = (e) => alert(e.message || e);
+  // Nombre de una línea de productividad (quien reprocesa tiene una segunda línea por el preaprobado condicionado)
+  // Ordena por la productividad de su análisis y deja la línea del preaprobado justo debajo de la del mismo analista
+  const ordenLineas = (l) => {
+    const base = new Map(l.filter((a) => !a.preaprobado).map((a) => [a.nombre, a.prod || 0]));
+    return l.sort((a, b) => (base.get(b.nombre) || 0) - (base.get(a.nombre) || 0) || a.nombre.localeCompare(b.nombre) || (a.preaprobado ? 1 : 0) - (b.preaprobado ? 1 : 0));
+  };
+  const nomLinea = (a) => `${titulo(a.nombre)}${a.preaprobado ? ' · preaprobado condicionado' : ''}`;
   const metas = () => S.C.cfg.metas;
   const metaTxt = () => DAC.PRODUCTOS.map((p) => `${p} ≤ ${metas()[p]} min`).join(' · ');
   const min2 = (s) => (s == null ? null : Math.round(s / 6) / 10); // segundos → minutos con un decimal (para Excel)
@@ -323,7 +330,7 @@
       clic: MA[i] ? `mes:${m}` : null })), { fmt: n2, etiquetas: true, color: 'var(--navy)', marcarMax: false });
 
     const yo = soloYo();
-    const pa = M.porAnalista.filter((a) => !yo || a.nombre === yo).sort((a, b) => (b.prod || 0) - (a.prod || 0));
+    const pa = ordenLineas(M.porAnalista.filter((a) => !yo || a.nombre === yo));
     const ult = S.D.config.ultima_actualizacion;
     const seg = `<div class="seg">${[['mes', 'Mensual'], ['trimestre', 'Trimestral'], ['semestre', 'Semestral'], ['anio', 'Anual']].map(([k, t]) => `<button data-dgran="${k}" class="${S.dgran === k ? 'on' : ''}">${t}</button>`).join('')}</div>`;
     const selP = `<select data-f="dper">${L.map((x) => `<option value="${x.desde}" ${x.desde === P.desde ? 'selected' : ''}>${S.dgran === 'mes' ? mesTxt(x.desde.slice(0, 7)) : x.nom}</option>`).join('')}</select>`;
@@ -354,8 +361,8 @@
         <div class="card"><h3>Tiempos de respuesta · ${F ? textoFiltro(F) : nomP}</h3><p class="muted small" style="margin-top:-4px">Tiempo de la solicitud contra la meta de su producto (${metaTxt()}).${esMes ? ' Semanas de lunes a domingo según el día de ingreso al DAC; clic en una semana para filtrar.' : ' Clic en un mes para verlo.'}</p>
           ${GRAF.apiladas(porGrupo, SERIE_META())}</div>
         <div class="card" style="grid-column:1/-1"><h3>Productividad por analista${F ? ` · ${textoFiltro(F)}` : ''}</h3><p class="muted small" style="margin-top:-4px">Solicitudes en que intervino / días disponibles. Cambia con el filtro de día y hora; clic en un analista para filtrar todo el dashboard (incluido el mapa) a sus solicitudes.</p>
-          ${GRAF.barras(pa.map((a) => ({ nombre: titulo(a.nombre), y: a.prod, color: COLOR[a.producto],
-            tip: `${esc(titulo(a.nombre))} (${a.producto})<br>${a.n} solicitudes / ${n2(a.disp)} días = ${n2(a.prod)}<br><i>clic para ${F && F.analista === a.nombre ? 'quitar el filtro del analista' : 'filtrar el dashboard por este analista'}</i>`,
+          ${GRAF.barras(pa.map((a) => ({ nombre: nomLinea(a), y: a.prod, color: a.preaprobado ? 'var(--naranja)' : COLOR[a.producto],
+            tip: `${esc(nomLinea(a))} (${a.producto})<br>${a.n} solicitudes / ${n2(a.disp)} días = ${n2(a.prod)}<br><i>clic para ${F && F.analista === a.nombre ? 'quitar el filtro del analista' : 'filtrar el dashboard por este analista'}</i>`,
             clic: filClic(F && F.d1, F && F.d2, F && F.hora, F && F.analista === a.nombre ? '' : a.nombre), sel: F && F.analista === a.nombre })), { fmt: n2 })}
           <div class="leyenda" style="margin-top:8px">${DAC.PRODUCTOS.map((p) => `<span><i style="background:${COLOR[p]};height:10px;width:10px"></i>${p}</span>`).join('')}</div></div>
         <div class="card"><h3>Tiempos de respuesta por mes · ${anio}</h3><p class="muted small" style="margin-top:-4px">Año completo, sin el filtro de día u hora. Clic en un mes para verlo.</p>${evoT}</div>
@@ -689,7 +696,7 @@
   function productividad() {
     const [d, h] = rangoMes(S.mes);
     const C = S.C, M = DAC.metricas(C, S.D, d, h, filtroDatos()), yo = soloYo();
-    const filas = M.porAnalista.filter((a) => !yo || a.nombre === yo).sort((a, b) => (b.prod || 0) - (a.prod || 0));
+    const filas = ordenLineas(M.porAnalista.filter((a) => !yo || a.nombre === yo));
     const ausentes = (nom) => (S.D.ausencias || []).filter((a) => a.analista === nom && a.hasta >= d && a.desde <= h).length;
     // Solicitudes de cada analista según cómo le llegaron: por su análisis (con o sin preaprobado) o por preaprobado (reproceso)
     const conPre = new Set(S.D.tramos.filter((t) => t.tipo === 'reproceso').map((t) => t.solicitud));
@@ -705,18 +712,18 @@
     return `${filtros()}
       <div class="card"><h3>Productividad por analista · ${mesTxt(S.mes)}</h3>
         <p class="muted small">${notaHoy(M)} Cada solicitud cuenta para cada analista que intervino en ella (aunque sea de otro producto). Días disponibles = días hábiles − vacaciones/permisos + eventos especiales asignados.
-          <b>Por su análisis</b> + <b>Solo por preaprobado</b> = Solicitudes. Clic en una cantidad para ver las solicitudes.</p>
+          Quien reprocesa el preaprobado condicionado tiene dos líneas: lo que analizó (incluye las que ella misma pasó a preaprobado) y lo que le llegó solo por el preaprobado; cada una con su productividad sobre los mismos días disponibles. Clic en una cantidad para ver las solicitudes.</p>
         <div class="tabla"><table><thead><tr><th>Analista</th><th>Producto</th><th class="num">Solicitudes</th><th class="num">De su producto</th><th class="num">De otros productos</th>
           <th class="num" data-tip="Solicitudes que analizó (tramo de análisis)">Por su análisis</th><th class="num" data-tip="Las analizó y nunca pasaron por preaprobado condicionado">· sin preaprobado</th><th class="num" data-tip="Las analizó y después pasaron por preaprobado condicionado">· con preaprobado</th>
           <th class="num" data-tip="Le llegaron solo por el reprocesamiento del preaprobado condicionado (no las analizó)">Solo por preaprobado</th><th class="num">Días disponibles</th><th class="num">Productividad</th></tr></thead><tbody>
-        ${filas.map((a) => { const g = grupos(a); return `<tr><td>${esc(titulo(a.nombre))}</td><td>${prodTag(a.producto)}</td><td class="num">${n0(a.n)}</td><td class="num">${n0(a.propio)}</td><td class="num">${n0(a.otros)}</td>
+        ${filas.map((a) => { const g = grupos(a); return `<tr${a.preaprobado ? ' class="linea-pre"' : ''}><td>${esc(nomLinea(a))}</td><td>${prodTag(a.producto)}</td><td class="num">${n0(a.n)}</td><td class="num">${n0(a.propio)}</td><td class="num">${n0(a.otros)}</td>
           ${cel(a, g.an, 'por su análisis')}${cel(a, g.sinPre, 'su análisis sin preaprobado', `${g.sinPreConPA} de ${g.sinPre.length} pasaron por PRE ANALISIS`)}${cel(a, g.conPreA, 'su análisis con preaprobado')}${cel(a, g.soloRe, 'solo por preaprobado (reproceso)')}
           <td class="num">${n2(a.disp)}${ausentes(a.nombre) ? ' <span class="muted small" data-tip="Tiene vacaciones o permisos en el mes">✱</span>' : ''}</td><td class="num"><b>${n2(a.prod)}</b></td></tr>`; }).join('')}
         ${yo ? '' : `<tr class="total"><td>Departamento</td><td></td><td class="num">${n0(M.depto.n)}</td><td colspan="6" class="muted small">solicitudes únicas (una solicitud con varios analistas cuenta una vez)</td><td class="num">${n2(M.depto.disp)}</td><td class="num">${n2(M.depto.prod)}</td></tr>`}
         </tbody></table></div>
         ${!yo && M.sinConfigurar.length ? `<div class="nota alerta">Intervinieron usuarios que no son analistas: ${M.sinConfigurar.map((x) => `${esc(titulo(x.nombre))} (${x.n})`).join(', ')}. Sus solicitudes y tiempos sí cuentan para el departamento, pero no tienen productividad propia ni suman al número de analistas.</div>` : ''}
       </div>
-      <div class="card"><h3>Comparativo</h3>${GRAF.barras(filas.map((a) => ({ nombre: titulo(a.nombre), y: a.prod, color: COLOR[a.producto] })), { fmt: n2 })}</div>`;
+      <div class="card"><h3>Comparativo</h3>${GRAF.barras(filas.map((a) => ({ nombre: nomLinea(a), y: a.prod, color: a.preaprobado ? 'var(--naranja)' : COLOR[a.producto] })), { fmt: n2 })}</div>`;
   }
 
   // ---------- Departamento (global) ----------
@@ -772,14 +779,16 @@
       <label>Producto<select data-f="producto"><option value="">Todos</option>${DAC.PRODUCTOS.map((p) => `<option ${p === S.producto ? 'selected' : ''}>${p}</option>`).join('')}</select></label></div>`;
     if (!filas.length) return cabeza + '<div class="card vacio">La información está disponible desde enero 2026.</div>';
     const serie = (nom, color, f) => ({ nombre: nom, color, puntos: filas.map((r) => ({ x: r.nom, y: f(r) })) });
-    const an = C.analistas.filter((a) => !yo || a.nombre === yo);
-    const prodA = filas.map((r) => new Map(r.M.porAnalista.map((a) => [a.nombre, a])));
+    const lineas = new Map();
+    for (const r of filas) for (const a of r.M.porAnalista) if ((!yo || a.nombre === yo) && (!a.preaprobado || a.n)) lineas.set(a.clave, a);
+    const an = [...lineas.values()].sort((x, y) => x.nombre.localeCompare(y.nombre) || (x.preaprobado ? 1 : -1));
+    const prodA = filas.map((r) => new Map(r.M.porAnalista.map((a) => [a.clave, a])));
     // Total del año (o de lo que va del año) para cada analista
     const MT = filas.length > 1 ? DAC.metricas(C, S.D, filas[0].desde, filas[filas.length - 1].hasta, filtroDatos()) : null;
-    const totA = MT ? new Map(MT.porAnalista.map((a) => [a.nombre, a])) : null;
+    const totA = MT ? new Map(MT.porAnalista.map((a) => [a.clave, a])) : null;
     return `${cabeza}
       <div class="card"><h3>Productividad acumulada</h3>
-        ${yo ? GRAF.lineas([serie('Mi productividad', 'var(--s-pers)', (r) => r.M.porAnalista.find((a) => a.nombre === yo)?.prod ?? null), serie('Departamento', 'var(--s-pymes)', (r) => r.M.depto.prod)], { fmt: n2 })
+        ${yo ? GRAF.lineas([serie('Mi productividad', 'var(--s-pers)', (r) => r.M.porAnalista.find((a) => a.nombre === yo && !a.preaprobado)?.prod ?? null), serie('Departamento', 'var(--s-pymes)', (r) => r.M.depto.prod)], { fmt: n2 })
           : GRAF.lineas(S.producto ? [serie(S.producto, COLOR[S.producto], (r) => r.M.porProducto[S.producto].prod)]
             : [serie('Departamento', 'var(--navy)', (r) => r.M.depto.prod), ...DAC.PRODUCTOS.map((p) => serie(p, COLOR[p], (r) => r.M.porProducto[p].prod))], { fmt: n2 })}
         <div class="tabla" style="margin-top:10px"><table><thead><tr><th>Período</th><th class="num">Solicitudes</th><th class="num">Días hábiles</th><th class="num">Analistas disp.</th><th class="num">Productividad</th>
@@ -788,7 +797,7 @@
             ${DAC.PRODUCTOS.map((p) => `<td class="num">${n2(r.M.porProducto[p].prod)}</td><td class="num" data-tip="${n0(r.TP[p].n)} solicitudes con tiempo medido">${pct(r.TP[p].enMeta)}</td>`).join('')}<td class="num">${dur(r.T.mediana)}</td><td class="num">${pct(r.T.enMeta)}</td></tr>`).join('')}
           </tbody></table></div></div>
       <div class="card"><h3>Productividad por analista</h3><div class="tabla"><table><thead><tr><th>Analista</th>${filas.map((r) => `<th class="num">${r.nom}</th>`).join('')}${MT ? `<th class="num">Total ${S.anio}</th>` : ''}</tr></thead><tbody>
-        ${an.map((a) => `<tr><td>${esc(titulo(a.nombre))} <span class="muted small">${a.producto}</span></td>${[...prodA, ...(totA ? [totA] : [])].map((m, i) => { const x = m.get(a.nombre); const b = i === prodA.length; return `<td class="num" data-tip="${x ? `${x.n} solicitudes / ${n2(x.disp)} días` : ''}">${b ? '<b>' : ''}${n2(x && x.prod)}${b ? '</b>' : ''}</td>`; }).join('')}</tr>`).join('')}
+        ${an.map((a) => `<tr${a.preaprobado ? ' class="linea-pre"' : ''}><td>${esc(nomLinea(a))} <span class="muted small">${a.producto}</span></td>${[...prodA, ...(totA ? [totA] : [])].map((m, i) => { const x = m.get(a.clave); const b = i === prodA.length; return `<td class="num" data-tip="${x ? `${x.n} solicitudes / ${n2(x.disp)} días` : ''}">${b ? '<b>' : ''}${n2(x && x.prod)}${b ? '</b>' : ''}</td>`; }).join('')}</tr>`).join('')}
       </tbody></table></div></div>`;
   }
 

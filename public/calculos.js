@@ -212,12 +212,22 @@
       (s.producto === C.productoDe.get(t.analista) ? p.propio : p.otros).add(s.solicitud);
       (t.tipo === 'reproceso' ? p.reproceso : p.analisis).add(s.solicitud);
     }
-    const porAnalista = C.analistas.map((a) => {
+    // Dos líneas para quien reprocesa: lo que analizó (incluye las que ella misma pasó a preaprobado) y lo que le llegó
+    // solo por el reprocesamiento del preaprobado condicionado. Cada una ÷ sus días disponibles (indicado por el usuario 23-oct).
+    const porAnalista = [];
+    for (const a of C.analistas) {
       const p = part.get(a.nombre) || { sols: new Set(), propio: new Set(), otros: new Set(), reproceso: new Set(), analisis: new Set() };
       const disp = C.disponibilidad(a.nombre, desde, hasta, true);
-      return { nombre: a.nombre, producto: a.producto, n: p.sols.size, propio: p.propio.size, otros: p.otros.size,
-        reproceso: p.reproceso.size, ids: { analisis: p.analisis, reproceso: p.reproceso }, disp, prod: disp ? p.sols.size / disp : null };
-    });
+      const soloRe = new Set([...p.reproceso].filter((id) => !p.analisis.has(id)));
+      const linea = (ids, rep, pre) => {
+        const l = [...ids], propio = l.filter((id) => p.propio.has(id)).length;
+        return { nombre: a.nombre, clave: pre ? `${a.nombre}|preaprobado` : a.nombre, preaprobado: pre, producto: a.producto, n: l.length,
+          propio, otros: l.length - propio, reproceso: rep.size, ids: { analisis: pre ? new Set() : p.analisis, reproceso: rep }, disp, prod: disp ? l.length / disp : null };
+      };
+      const propias = new Set([...p.sols].filter((id) => !soloRe.has(id)));
+      porAnalista.push(linea(propias, new Set([...p.reproceso].filter((id) => p.analisis.has(id))), false));
+      if (soloRe.size) porAnalista.push(linea(soloRe, soloRe, true));
+    }
     const sinConfigurar = [...part.keys()].filter((n) => !C.esAnalista.has(n))
       .map((n) => ({ nombre: n, n: part.get(n).sols.size }));
     return { sols, depto, porProducto, porAnalista, sinConfigurar };

@@ -155,3 +155,4 @@ tr.sel td { background: #FFE9D6 !important; font-weight: 700; }
 .hb .bar.sel { box-shadow: 0 0 0 2px var(--naranja); }
 .dist-modo { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin: 6px 0; }
 .dist-modo .seg button { padding: 4px 10px; font-size: 12px; }
+tr.linea-pre td:first-child { padding-left: 22px; color: var(--naranja); }
