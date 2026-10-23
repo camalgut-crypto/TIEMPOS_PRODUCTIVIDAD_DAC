@@ -225,55 +225,89 @@
   const casosDe = (C, sols) => sols.filter((s) => !s.reestructura).map((s) => C.global(s)).filter(Boolean);
   const flujoEn = (d, h) => S.D.flujo_rapido.filter((x) => x.creada && x.creada.slice(0, 10) >= d && x.creada.slice(0, 10) <= h);
 
+  // Filtro del dashboard al hacer clic en un día, una hora, una celda del mapa o una semana: "fil|desde|hasta|hora"
+  const filClic = (d1, d2, hora) => `fil|${d1 || ''}|${d2 || ''}|${hora ?? ''}`;
+  function textoFiltro(F) {
+    const dia = (f) => `${Number(f.slice(8))} ${MES3[Number(f.slice(5, 7)) - 1].toLowerCase()}`;
+    const p = [];
+    if (F.d1) p.push(F.d1 === F.d2 ? dia(F.d1) : `${dia(F.d1)} – ${dia(F.d2)}`);
+    if (F.hora != null) p.push(`${F.hora}:00 a ${F.hora}:59`);
+    return p.join(' · ');
+  }
+
   function dashboard() {
     const { P, L } = periodoDash();
-    const d = P.desde, h = P.hasta, esMes = S.dgran === 'mes';
-    const C = S.C, M = DAC.metricas(C, S.D, d, h);
+    const esMes = S.dgran === 'mes';
+    // El filtro de día/hora solo vale para el período en que se hizo
+    const F = S.dfiltro && S.dfiltro.per === `${S.dgran}:${P.desde}` ? S.dfiltro : (S.dfiltro = null);
+    const d = (F && F.d1) || P.desde, h = (F && F.d2) || P.hasta;
+    const deHora = (f) => !F || F.hora == null || (!!f && Number(f.slice(11, 13)) === F.hora);
+    const filtro = { pred: (s) => deHora(s.ingreso_dac) };
+    const C = S.C, M = DAC.metricas(C, S.D, d, h, filtro);
     const casos = casosDe(C, M.sols);
     const T = DAC.resumenTiempos(casos, metas());
-    const R = DAC.resumenTiempos(DAC.reprocesos(C, S.D, d, h), metas());
-    const fr = flujoEn(d, h);
-    const hastaHoy = h > C.hoy ? C.hoy : h;
+    const R = DAC.resumenTiempos(DAC.reprocesos(C, S.D, d, h, filtro), metas());
+    const fr = flujoEn(d, h).filter((x) => deHora(x.creada));
+    const hastaHoy = P.hasta > C.hoy ? C.hoy : P.hasta;
     const nomP = esMes ? mesTxt(S.mes) : P.nom;
 
-    // Ingresos al DAC: el día (o mes) en que la solicitud pasó por primera vez a POR ASIGNAR A ANALISTA
-    let graf1;
-    if (esMes) {
-      const porDia = new Map();
-      for (const s of M.sols) { const k = s.ingreso_dac.slice(0, 10); porDia.set(k, (porDia.get(k) || 0) + 1); }
-      graf1 = `<h3>Solicitudes que ingresaron al DAC por día</h3>${GRAF.columnas([...DAC.dias(d, hastaHoy)].map((f) => ({ x: Number(f.slice(8)), y: porDia.get(f) || 0,
-        tip: `${f.slice(8)}/${f.slice(5, 7)} · ${n0(porDia.get(f) || 0)} solicitudes · ${C.valorDia(f) ? `día hábil ${C.valorDia(f)}` : 'no hábil'}` })), { fmt: n0 })}`;
-    } else {
-      graf1 = `<h3>Solicitudes que ingresaron al DAC por mes</h3>${GRAF.columnas(mesesEntre(d, hastaHoy).map((m) => {
-        const n = M.sols.filter((s) => s.ingreso_dac.startsWith(m)).length;
-        return { x: MES3[Number(m.slice(5)) - 1], y: n, tip: `${mesTxt(m)} · ${n0(n)} solicitudes<br><i>clic para ver el mes</i>`, clic: `mes:${m}` };
-      }), { fmt: n0, etiquetas: true })}`;
+    // Flujo de ingresos: día (o mes) en el eje horizontal, hora de ingreso al DAC en el vertical. Siempre del período
+    // completo, para poder elegir un día, una hora o una celda y filtrar el resto del dashboard.
+    const solsP = S.D.solicitudes.filter((s) => s.ingreso_dac.slice(0, 10) >= P.desde && s.ingreso_dac.slice(0, 10) <= P.hasta);
+    const cols = esMes ? [...DAC.dias(P.desde, hastaHoy)].map((f) => ({ k: f, d1: f, d2: f, t: Number(f.slice(8)), sub: DSEM[(DAC.fecha(f).getDay() + 6) % 7][0], nohabil: !C.valorDia(f) }))
+      : mesesEntre(P.desde, hastaHoy).map((m) => ({ k: m, d1: `${m}-01`, d2: rangoMes(m)[1], t: MES3[Number(m.slice(5)) - 1], sub: '' }));
+    const colDe = (s) => (esMes ? s.ingreso_dac.slice(0, 10) : s.ingreso_dac.slice(0, 7));
+    const cnt = new Map();
+    let hMin = 8, hMax = 18;
+    for (const s of solsP) {
+      const hr = Number(s.ingreso_dac.slice(11, 13)), key = `${colDe(s)}|${hr}`;
+      cnt.set(key, (cnt.get(key) || 0) + 1);
+      hMin = Math.min(hMin, hr); hMax = Math.max(hMax, hr);
     }
-    graf1 += '<p class="muted small" style="margin:4px 0 0">Fecha en que la solicitud pasó por primera vez a POR ASIGNAR A ANALISTA. Si se creó en un mes y entró al DAC el mes siguiente, no se cuenta como ingreso.</p>';
+    const horasM = Array.from({ length: hMax - hMin + 1 }, (_, i) => hMin + i);
+    const maxC = Math.max(1, ...cnt.values());
+    const totCol = (c) => horasM.reduce((t, hr) => t + (cnt.get(`${c.k}|${hr}`) || 0), 0);
+    const totHora = (hr) => cols.reduce((t, c) => t + (cnt.get(`${c.k}|${hr}`) || 0), 0);
+    const selCol = (c) => F && F.d1 && F.d1 <= c.d1 && F.d2 >= c.d2;
+    const selHora = (hr) => F && F.hora === hr;
+    const celda = (c, hr) => {
+      const n = cnt.get(`${c.k}|${hr}`) || 0, v = n / maxC;
+      const on = (selCol(c) || !(F && F.d1)) && (selHora(hr) || !F || F.hora == null) && F ? ' on' : '';
+      return `<td class="c${on}" style="${n ? `background:rgba(6,37,91,${(0.08 + 0.85 * v).toFixed(2)});color:${v > 0.45 ? '#fff' : 'var(--navy)'}` : ''}"
+        data-clic="${filClic(c.d1, c.d2, hr)}" data-tip="${esMes ? `${Number(c.k.slice(8))}/${c.k.slice(5, 7)}` : mesTxt(c.k)} · ${hr}:00 a ${hr}:59<br><b>${n0(n)}</b> solicitudes<br><i>clic para filtrar</i>">${n || ''}</td>`;
+    };
+    const mapa = `<h3>Flujo de ingresos al DAC por ${esMes ? 'día' : 'mes'} y hora</h3>
+      <p class="muted small" style="margin-top:-4px">Cada celda es la cantidad de solicitudes que pasaron por primera vez a POR ASIGNAR A ANALISTA ese ${esMes ? 'día' : 'mes'} a esa hora (más oscuro = más solicitudes). Clic en ${esMes ? 'un día' : 'un mes'}, una hora o una celda para filtrar todo el dashboard; otro clic en lo mismo quita el filtro. Si se creó en un mes y entró al DAC el mes siguiente, no se cuenta como ingreso.</p>
+      <div class="tabla mapa"><table><thead><tr><th>Hora</th>${cols.map((c) => `<th class="num${selCol(c) ? ' on' : ''}${c.nohabil ? ' nh' : ''}" data-clic="${esMes ? filClic(c.d1, c.d2, F && F.hora) : `mes:${c.k}`}" data-tip="${esMes ? 'Clic para filtrar este día' : 'Clic para ver el mes'}">${c.t}<br><span class="small">${c.sub}</span></th>`).join('')}<th class="num">Total</th></tr></thead><tbody>
+      ${horasM.map((hr) => `<tr><td class="hh${selHora(hr) ? ' on' : ''}" data-clic="${filClic(F && F.d1, F && F.d2, hr)}" data-tip="Clic para filtrar esta hora">${hr}:00</td>${cols.map((c) => celda(c, hr)).join('')}<td class="num"><b>${n0(totHora(hr))}</b></td></tr>`).join('')}
+      <tr class="total"><td>Total</td>${cols.map((c) => `<td class="num${selCol(c) ? ' on' : ''}" ${esMes ? `data-clic="${filClic(c.d1, c.d2, F && F.hora)}"` : `data-clic="mes:${c.k}"`}>${n0(totCol(c))}</td>`).join('')}<td class="num">${n0(solsP.length)}</td></tr></tbody></table></div>`;
 
-    // Horas pico: hora en que ingresó al DAC
+    // Horas pico: hora en que ingresó al DAC (con el filtro de día aplicado). Clic en una hora para filtrar.
     const porHora = new Map();
     for (const s of M.sols) { const k = Number(s.ingreso_dac.slice(11, 13)); porHora.set(k, (porHora.get(k) || 0) + 1); }
     const maxH = Math.max(1, ...porHora.values());
-    const horas = `<h3>Horas pico</h3><p class="muted small" style="margin-top:-4px">Hora en que la solicitud ingresó al DAC</p>
+    const horas = `<h3>Horas pico</h3><p class="muted small" style="margin-top:-4px">Hora en que la solicitud ingresó al DAC. Clic en una hora para filtrar.</p>
       <div class="tabla"><table class="compacta"><thead><tr><th>Hora de ingreso</th><th class="num">Cantidad</th><th class="num">%</th><th style="width:45%"></th></tr></thead><tbody>
-      ${[...porHora.keys()].sort((a, b) => a - b).map((k) => { const n = porHora.get(k); return `<tr><td>${k}:00</td><td class="num">${n0(n)}</td><td class="num">${pct(n / M.sols.length)}</td>
+      ${[...porHora.keys()].sort((a, b) => a - b).map((k) => { const n = porHora.get(k); return `<tr class="clicable${selHora(k) ? ' sel' : ''}" data-clic="${filClic(F && F.d1, F && F.d2, k)}"><td>${k}:00</td><td class="num">${n0(n)}</td><td class="num">${pct(n / M.sols.length)}</td>
         <td><div class="bar1"><b style="width:${(100 * n) / maxH}%;background:${n === maxH ? 'var(--navy)' : 'var(--verde)'}"></b></div></td></tr>`; }).join('')}
       <tr class="total"><td>Total</td><td class="num">${n0(M.sols.length)}</td><td class="num">${M.sols.length ? '100.0%' : '—'}</td><td></td></tr></tbody></table></div>`;
 
-    // Tiempos de respuesta del período: por semana (mes) o por mes (trimestre, semestre, año)
-    const diasP = [...DAC.dias(d, h)];
-    const claves = esMes ? [...new Set(diasP.map((f) => `W${DAC.semanaMes(f)}`))] : mesesEntre(d, h);
+    // Tiempos de respuesta: por semana (mes) o por mes (trimestre, semestre, año). Clic en una semana para filtrar.
+    const diasP = [...DAC.dias(P.desde, P.hasta)];
+    const claves = esMes ? [...new Set(diasP.map((f) => `W${DAC.semanaMes(f)}`))] : mesesEntre(P.desde, P.hasta);
     const grupoDe = (c) => (esMes ? `W${DAC.semanaMes(c.sol.ingreso_dac)}` : c.sol.ingreso_dac.slice(0, 7));
-    const rangoSem = (w) => { const f = diasP.filter((x) => `W${DAC.semanaMes(x)}` === w); return `${Number(f[0].slice(8))}–${Number(f[f.length - 1].slice(8))} ${MES3[Number(d.slice(5, 7)) - 1].toLowerCase()}`; };
+    const diasSem = (w) => diasP.filter((x) => `W${DAC.semanaMes(x)}` === w);
+    const rangoSem = (w) => { const f = diasSem(w); return `${Number(f[0].slice(8))}–${Number(f[f.length - 1].slice(8))} ${MES3[Number(P.desde.slice(5, 7)) - 1].toLowerCase()}`; };
     const porGrupo = claves.map((k) => {
       const Rk = DAC.resumenTiempos(casos.filter((c) => grupoDe(c) === k), metas());
-      return { x: esMes ? k : MES3[Number(k.slice(5)) - 1], partes: partesMeta(Rk), tip: tipMeta(esMes ? `${k} (${rangoSem(k)})` : mesTxt(k), Rk), clic: esMes ? null : `mes:${k}` };
+      const f = esMes ? diasSem(k) : null;
+      return { x: esMes ? k : MES3[Number(k.slice(5)) - 1], partes: partesMeta(Rk), tip: `${tipMeta(esMes ? `${k} (${rangoSem(k)})` : mesTxt(k), Rk)}<br><i>clic para ${esMes ? 'filtrar la semana' : 'ver el mes'}</i>`,
+        clic: esMes ? filClic(f[0], f[f.length - 1], F && F.hora) : `mes:${k}` };
     });
-    porGrupo.push({ x: 'Total', total: true, partes: partesMeta(T), tip: tipMeta(`Total ${nomP}`, T) });
+    porGrupo.push({ x: 'Total', total: true, partes: partesMeta(T), tip: tipMeta(`Total ${F ? textoFiltro(F) : nomP}`, T) });
 
     // Evolución del año: tiempos de respuesta y productividad por mes (clic en un mes para verlo)
-    const anio = d.slice(0, 4), mesHoy = C.hoy.slice(0, 7);
+    const anio = P.desde.slice(0, 4), mesHoy = C.hoy.slice(0, 7);
     const mesesAnio = MESES.map((_, i) => `${anio}-${String(i + 1).padStart(2, '0')}`);
     const MA = mesesAnio.map((m) => (m < INICIO || m > mesHoy ? null : DAC.metricas(C, S.D, ...rangoMes(m))));
     const RA = MA.map((x) => (x ? DAC.resumenTiempos(casosDe(C, x.sols), metas()) : null));
@@ -292,7 +326,8 @@
     return `
       <div class="cabeza">
         <div><h2>Departamento de Análisis · ${nomP}</h2>
-          <div class="muted small">${notaHoy(M, [d, h])} Última actualización: <b>${fh(ult)}</b></div></div>
+          <div class="muted small">${notaHoy(M, [d, h])} Última actualización: <b>${fh(ult)}</b></div>
+          ${F ? `<div class="chip-filtro">Filtrado: <b>${textoFiltro(F)}</b> <button class="btn sec mini" data-act="quitarFiltro">✕ Quitar filtro</button></div>` : ''}</div>
         <div><div class="filtros"><label>Período${seg}</label><label>&nbsp;${selP}</label><button class="btn" data-act="actualizar">⟳ Actualizar</button></div>
           <div class="estado-act muted" id="estadoAct" style="margin-top:-8px"></div></div>
       </div>
@@ -309,17 +344,17 @@
           <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="tit" style="font-size:28px;font-weight:800;color:var(--navy)">${n2(x.prod)}</span><span class="muted small">productividad</span></div>
           <div class="muted small">${n0(x.n)} solicitudes · ${n2(x.porDia)} por día · ${x.analistas} analistas (${n2(x.equiv)} disponibles)<br>
             Meta ≤ ${metas()[p]} min: <b>${pct(Tp.enMeta)}</b> dentro · mediana ${dur(Tp.mediana)}</div></div>`; }).join('')}</div>
+      <div class="card" style="margin-bottom:14px">${mapa}</div>
       <div class="grid g2">
-        <div class="card">${graf1}</div>
         <div class="card">${horas}</div>
-        <div class="card"><h3>Tiempos de respuesta · ${nomP}</h3><p class="muted small" style="margin-top:-4px">Tiempo de la solicitud contra la meta de su producto (${metaTxt()}).${esMes ? ' Semanas de lunes a domingo según el día de ingreso al DAC.' : ' Clic en un mes para verlo.'}</p>
+        <div class="card"><h3>Tiempos de respuesta · ${F ? textoFiltro(F) : nomP}</h3><p class="muted small" style="margin-top:-4px">Tiempo de la solicitud contra la meta de su producto (${metaTxt()}).${esMes ? ' Semanas de lunes a domingo según el día de ingreso al DAC; clic en una semana para filtrar.' : ' Clic en un mes para verlo.'}</p>
           ${GRAF.apiladas(porGrupo, SERIE_META())}</div>
-        <div class="card"><h3>Productividad por analista</h3><p class="muted small" style="margin-top:-4px">Solicitudes en que intervino / días disponibles</p>
+        <div class="card" style="grid-column:1/-1"><h3>Productividad por analista${F ? ` · ${textoFiltro(F)}` : ''}</h3><p class="muted small" style="margin-top:-4px">Solicitudes en que intervino / días disponibles</p>
           ${GRAF.barras(pa.map((a) => ({ nombre: titulo(a.nombre), y: a.prod, color: COLOR[a.producto],
             tip: `${esc(titulo(a.nombre))} (${a.producto})<br>${a.n} solicitudes / ${n2(a.disp)} días = ${n2(a.prod)}` })), { fmt: n2 })}
           <div class="leyenda" style="margin-top:8px">${DAC.PRODUCTOS.map((p) => `<span><i style="background:${COLOR[p]};height:10px;width:10px"></i>${p}</span>`).join('')}</div></div>
-        <div class="card"><h3>Tiempos de respuesta por mes · ${anio}</h3><p class="muted small" style="margin-top:-4px">Clic en un mes para verlo.</p>${evoT}</div>
-        <div class="card"><h3>Productividad por mes · ${anio}</h3><p class="muted small" style="margin-top:-4px">Productividad del departamento. Clic en un mes para verlo.</p>${evoP}</div>
+        <div class="card"><h3>Tiempos de respuesta por mes · ${anio}</h3><p class="muted small" style="margin-top:-4px">Año completo, sin el filtro de día u hora. Clic en un mes para verlo.</p>${evoT}</div>
+        <div class="card"><h3>Productividad por mes · ${anio}</h3><p class="muted small" style="margin-top:-4px">Productividad del departamento, año completo. Clic en un mes para verlo.</p>${evoP}</div>
       </div>`;
   }
 
@@ -1048,9 +1083,15 @@
     const cerrar = e.target.closest('[data-cerrar]');
     if (cerrar && (cerrar === e.target || cerrar.tagName === 'BUTTON')) { cerrarLista(); return; }
     const g = e.target.closest('[data-clic]');
-    if (g) { // clic en un mes de un gráfico: el dashboard pasa a ese mes
-      const [k, v] = g.dataset.clic.split(':');
-      if (k === 'mes') { S.dgran = 'mes'; S.mes = v; vista(); }
+    if (g) {
+      const v = g.dataset.clic;
+      if (v.startsWith('fil|')) { // día, hora, celda o semana: filtra todo el dashboard (otro clic en lo mismo lo quita)
+        const [, d1, d2, hora] = v.split('|');
+        const nuevo = { per: `${S.dgran}:${S.dper}`, d1: d1 || null, d2: d2 || null, hora: hora === '' ? null : Number(hora) };
+        const F = S.dfiltro;
+        S.dfiltro = F && F.per === nuevo.per && F.d1 === nuevo.d1 && F.d2 === nuevo.d2 && F.hora === nuevo.hora ? null : nuevo;
+      } else if (v.startsWith('mes:')) { S.dgran = 'mes'; S.mes = v.slice(4); } // un mes de un gráfico: el dashboard pasa a ese mes
+      vista();
       return;
     }
     const b = e.target.closest('button');
@@ -1077,6 +1118,7 @@
       const act = b.dataset.act;
       if (act === 'salir') { await API.salir(); S.perfil = null; login(); }
       else if (act === 'clave') cambiarClave();
+      else if (act === 'quitarFiltro') { S.dfiltro = null; vista(); }
       else if (act === 'actualizar') { b.disabled = true; await pedirActualizacion(); b.disabled = false; }
       else if (act === 'bajarModal') await excel(MODAL.titulo.replace(/[\\/:*?"<>|]/g, ' '), { Detalle: MODAL.filas.map(xlsFila) });
       else if (act === 'bajarCiclo') { b.disabled = true; try { await bajarCiclo(); } finally { b.disabled = false; } }

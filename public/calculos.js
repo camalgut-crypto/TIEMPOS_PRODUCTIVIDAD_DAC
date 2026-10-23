@@ -177,7 +177,8 @@
   // ---------- Métricas de un período ----------
   function metricas(C, D, desde, hasta, filtro = {}) {
     const enRango = (f) => f && f.slice(0, 10) >= desde && f.slice(0, 10) <= hasta;
-    const pasa = (s) => (!filtro.producto || s.producto === filtro.producto) && (!filtro.tipo || s.tipo_credito === filtro.tipo);
+    const pasa = (s) => (!filtro.producto || s.producto === filtro.producto) && (!filtro.tipo || s.tipo_credito === filtro.tipo)
+      && (!filtro.pred || filtro.pred(s));
     const sols = D.solicitudes.filter((s) => enRango(s.ingreso_dac) && pasa(s));
     const dh = C.diasHabiles(desde, hasta);
 
@@ -246,7 +247,8 @@
     const out = [];
     for (const id of ids) {
       const s = C.solPorId.get(id);
-      if (!s || s.reestructura || (filtro.producto && s.producto !== filtro.producto) || (filtro.tipo && s.tipo_credito !== filtro.tipo)) continue;
+      if (!s || s.reestructura || (filtro.producto && s.producto !== filtro.producto) || (filtro.tipo && s.tipo_credito !== filtro.tipo)
+        || (filtro.pred && !filtro.pred(s))) continue;
       const r = C.reprocesoDe(id);
       if (!r || r.abierto || r.inicio.slice(0, 10) < desde || r.inicio.slice(0, 10) > hasta) continue;
       out.push(r);

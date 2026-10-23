@@ -134,3 +134,17 @@ tr.total .lnk { color: inherit; }
 .bar1 b { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 0 4px 4px 0; }
 table.compacta td { padding: 3px 10px; }
 .kpi .lnk { color: inherit; text-decoration-color: rgba(255,255,255,.6); }
+
+/* Mapa de calor del dashboard (día × hora) y filtro por clic */
+.mapa table { font-size: 11px; }
+.mapa th { padding: 4px 3px; line-height: 1.1; cursor: pointer; text-align: center; }
+.mapa th.nh { background: #7FB57A; }
+.mapa th.on, .mapa td.on { box-shadow: inset 0 0 0 2px var(--naranja); }
+.mapa td { padding: 3px 2px; text-align: center; border: 1px solid #fff; }
+.mapa td.c { min-width: 24px; cursor: pointer; font-weight: 700; }
+.mapa td.hh { font-weight: 700; cursor: pointer; white-space: nowrap; }
+.mapa tr.total td { cursor: pointer; }
+tr.clicable { cursor: pointer; }
+tr.clicable:hover td { background: var(--verde-10); }
+tr.sel td { background: #FFE9D6 !important; font-weight: 700; }
+.chip-filtro { margin-top: 6px; display: inline-flex; align-items: center; gap: 8px; background: #FFE9D6; color: var(--navy); border-radius: 8px; padding: 4px 6px 4px 10px; font-size: 13px; }
