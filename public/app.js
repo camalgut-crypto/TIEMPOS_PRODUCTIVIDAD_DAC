@@ -105,11 +105,10 @@
     pintar();
   }
   const recalcular = () => { S.C = DAC.contexto({ ...S.D, config: S.D.config }); };
-  // Universo DAC: lo creado en un mes que entró al DAC el mes siguiente no cuenta como ingreso (queda en fueraDeMes)
+  // Universo DAC: lo creado en un mes que entró al DAC el mes siguiente no cuenta como ingreso (DAC.mismoMes), pero sus
+  // tiempos y productividad sí cuentan en el mes de su última resolución (indicado por el usuario 26-oct)
   function preparar(D) {
-    const sols = D.solicitudes || [];
-    D.fueraDeMes = sols.filter((s) => !DAC.mismoMes(s));
-    D.solicitudes = sols.filter(DAC.mismoMes);
+    D.solicitudes = D.solicitudes || [];
     D.tramos = D.tramos || [];
     D.flujo_rapido = D.flujo_rapido || [];
     D.bitacora_resumen = D.bitacora_resumen || [];
@@ -188,7 +187,7 @@
 
   // Selector de mes, producto y tipo de crédito
   function meses() {
-    const s = new Set([INICIO, DAC.iso(new Date()).slice(0, 7), ...S.D.solicitudes.map((x) => x.ingreso_dac.slice(0, 7))]);
+    const s = new Set([INICIO, DAC.iso(new Date()).slice(0, 7), ...S.D.solicitudes.flatMap((x) => [x.ingreso_dac.slice(0, 7), DAC.cuenta(x).slice(0, 7)])]);
     return [...s].filter((p) => p >= INICIO).sort().reverse();
   }
   function filtros({ producto = true, tipo = true, extra = '' } = {}) {
@@ -264,7 +263,7 @@
 
     // Flujo de ingresos: día (o mes) en el eje horizontal, hora de ingreso al DAC en el vertical. Siempre del período
     // completo, para poder elegir un día, una hora o una celda y filtrar el resto del dashboard.
-    const solsP = S.D.solicitudes.filter((s) => s.ingreso_dac.slice(0, 10) >= P.desde && s.ingreso_dac.slice(0, 10) <= P.hasta && deAnalista(s));
+    const solsP = S.D.solicitudes.filter((s) => s.ingreso_dac.slice(0, 10) >= P.desde && s.ingreso_dac.slice(0, 10) <= P.hasta && DAC.mismoMes(s) && deAnalista(s));
     const cols = esMes ? [...DAC.dias(P.desde, hastaHoy)].map((f) => ({ k: f, d1: f, d2: f, t: Number(f.slice(8)), sub: DSEM[(DAC.fecha(f).getDay() + 6) % 7][0], nohabil: !C.valorDia(f) }))
       : mesesEntre(P.desde, hastaHoy).map((m) => ({ k: m, d1: `${m}-01`, d2: rangoMes(m)[1], t: MES3[Number(m.slice(5)) - 1], sub: '' }));
     const colDe = (s) => (esMes ? s.ingreso_dac.slice(0, 10) : s.ingreso_dac.slice(0, 7));
@@ -295,18 +294,18 @@
 
     // Horas pico: hora en que ingresó al DAC (con el filtro de día aplicado). Clic en una hora para filtrar.
     const porHora = new Map();
-    for (const s of M.sols) { const k = Number(s.ingreso_dac.slice(11, 13)); porHora.set(k, (porHora.get(k) || 0) + 1); }
+    for (const s of M.ingresos) { const k = Number(s.ingreso_dac.slice(11, 13)); porHora.set(k, (porHora.get(k) || 0) + 1); }
     const maxH = Math.max(1, ...porHora.values());
     const horas = `<h3>Horas pico</h3><p class="muted small" style="margin-top:-4px">Hora en que la solicitud ingresó al DAC. Clic en una hora para filtrar.</p>
       <div class="tabla"><table class="compacta"><thead><tr><th>Hora de ingreso</th><th class="num">Cantidad</th><th class="num">%</th><th style="width:45%"></th></tr></thead><tbody>
-      ${[...porHora.keys()].sort((a, b) => a - b).map((k) => { const n = porHora.get(k); return `<tr class="clicable${selHora(k) ? ' sel' : ''}" data-clic="${filClic(F && F.d1, F && F.d2, k)}"><td>${k}:00</td><td class="num">${n0(n)}</td><td class="num">${pct(n / M.sols.length)}</td>
+      ${[...porHora.keys()].sort((a, b) => a - b).map((k) => { const n = porHora.get(k); return `<tr class="clicable${selHora(k) ? ' sel' : ''}" data-clic="${filClic(F && F.d1, F && F.d2, k)}"><td>${k}:00</td><td class="num">${n0(n)}</td><td class="num">${pct(n / M.ingresos.length)}</td>
         <td><div class="bar1"><b style="width:${(100 * n) / maxH}%;background:${n === maxH ? 'var(--navy)' : 'var(--verde)'}"></b></div></td></tr>`; }).join('')}
-      <tr class="total"><td>Total</td><td class="num">${n0(M.sols.length)}</td><td class="num">${M.sols.length ? '100.0%' : '—'}</td><td></td></tr></tbody></table></div>`;
+      <tr class="total"><td>Total</td><td class="num">${n0(M.ingresos.length)}</td><td class="num">${M.ingresos.length ? '100.0%' : '—'}</td><td></td></tr></tbody></table></div>`;
 
     // Tiempos de respuesta: por semana (mes) o por mes (trimestre, semestre, año). Clic en una semana para filtrar.
     const diasP = [...DAC.dias(P.desde, P.hasta)];
     const claves = esMes ? [...new Set(diasP.map((f) => `W${DAC.semanaMes(f)}`))] : mesesEntre(P.desde, P.hasta);
-    const grupoDe = (c) => (esMes ? `W${DAC.semanaMes(c.sol.ingreso_dac)}` : c.sol.ingreso_dac.slice(0, 7));
+    const grupoDe = (c) => (esMes ? `W${DAC.semanaMes(DAC.cuenta(c.sol))}` : DAC.cuenta(c.sol).slice(0, 7));
     const diasSem = (w) => diasP.filter((x) => `W${DAC.semanaMes(x)}` === w);
     const rangoSem = (w) => { const f = diasSem(w); return `${Number(f[0].slice(8))}–${Number(f[f.length - 1].slice(8))} ${MES3[Number(P.desde.slice(5, 7)) - 1].toLowerCase()}`; };
     const porGrupo = claves.map((k) => {
@@ -343,7 +342,7 @@
           <div class="estado-act muted" id="estadoAct" style="margin-top:-8px"></div></div>
       </div>
       <div class="kpis">
-        <div class="kpi"><div class="l">Solicitudes DAC</div><div class="v">${n0(M.depto.n)}</div><div class="s">${n0(M.depto.reestructuras)} reestructuras · ${n2(M.depto.porDia)} por día hábil</div></div>
+        <div class="kpi"><div class="l">Solicitudes DAC</div><div class="v">${n0(M.depto.n)}</div><div class="s">${n0(M.depto.reestructuras)} reestructuras · ${n2(M.depto.porDia)} por día hábil · ${n0(M.ingresos.length)} ingresaron</div></div>
         <div class="kpi verde"><div class="l">Productividad del departamento</div><div class="v">${n2(M.depto.prod)}</div><div class="s">ponderada por producto · ${DAC.PRODUCTOS.map((p) => `${p} ${pct(M.depto.peso[p])}`).join(' · ')}</div></div>
         <div class="kpi cielo"><div class="l">Tiempo de la solicitud</div><div class="v">${dur(T.mediana)}</div><div class="s">mediana · promedio ${dur(T.prom)}</div></div>
         <div class="kpi lima"><div class="l">Dentro de la meta</div><div class="v">${pct(T.enMeta)}</div><div class="s">${metaTxt()} · ${n0(T.n)} solicitudes</div></div>
@@ -358,7 +357,7 @@
       <div class="card" style="margin-bottom:14px">${mapa}</div>
       <div class="grid g2">
         <div class="card">${horas}</div>
-        <div class="card"><h3>Tiempos de respuesta · ${F ? textoFiltro(F) : nomP}</h3><p class="muted small" style="margin-top:-4px">Tiempo de la solicitud contra la meta de su producto (${metaTxt()}).${esMes ? ' Semanas de lunes a domingo según el día de ingreso al DAC; clic en una semana para filtrar.' : ' Clic en un mes para verlo.'}</p>
+        <div class="card"><h3>Tiempos de respuesta · ${F ? textoFiltro(F) : nomP}</h3><p class="muted small" style="margin-top:-4px">Tiempo de la solicitud contra la meta de su producto (${metaTxt()}).${esMes ? ' Semanas de lunes a domingo según el día de la última resolución; clic en una semana para filtrar.' : ' Clic en un mes para verlo.'}</p>
           ${GRAF.apiladas(porGrupo, SERIE_META())}</div>
         <div class="card" style="grid-column:1/-1"><h3>Productividad por analista${F ? ` · ${textoFiltro(F)}` : ''}</h3><p class="muted small" style="margin-top:-4px">Solicitudes en que intervino / días disponibles. Cambia con el filtro de día y hora; clic en un analista para filtrar todo el dashboard (incluido el mapa) a sus solicitudes.</p>
           ${GRAF.barras(pa.map((a) => ({ nombre: nomLinea(a), y: a.prod, color: a.preaprobado ? 'var(--naranja)' : COLOR[a.producto],
@@ -424,11 +423,11 @@
   function notaTiempos() {
     const c = S.C.cfg;
     const j = c.jornada;
-    return `<p class="muted small">Tiempo en <b>${c.modo_tiempo === 'jornada' ? `horas hábiles (L-V ${j.lv[0]}–${j.lv[1]}, sábado ${j.sab[0]}–${j.sab[1]}, más horarios especiales)` : 'hora reloj'}</b>, sin contar: <b>${(c.estados_excluidos || []).join(', ') || 'ningún estado'}</b>. Las reestructuras no se miden. Cada solicitud se mide hasta el cierre del mes en que ingresó. Meta según el producto de la solicitud: <b>${metaTxt()}</b>. Rangos en minutos (como el Excel: -05 = hasta 5 min). Clic en la cantidad de casos para ver las solicitudes.</p>`;
+    return `<p class="muted small">Tiempo en <b>${c.modo_tiempo === 'jornada' ? `horas hábiles (L-V ${j.lv[0]}–${j.lv[1]}, sábado ${j.sab[0]}–${j.sab[1]}, más horarios especiales)` : 'hora reloj'}</b>, sin contar: <b>${(c.estados_excluidos || []).join(', ') || 'ningún estado'}</b>. Las reestructuras no se miden. Cada solicitud se mide completa y cuenta en el mes de su última resolución (sin resolución: el último mes en que tuvo un estado del DAC). Meta según el producto de la solicitud: <b>${metaTxt()}</b>. Rangos en minutos (como el Excel: -05 = hasta 5 min). Clic en la cantidad de casos para ver las solicitudes.</p>`;
   }
 
-  // Solicitudes del mes con los filtros de la pantalla
-  const solsMes = (d, h) => S.D.solicitudes.filter((s) => s.ingreso_dac.slice(0, 10) >= d && s.ingreso_dac.slice(0, 10) <= h
+  // Solicitudes que cuentan en el mes (última resolución) con los filtros de la pantalla
+  const solsMes = (d, h) => S.D.solicitudes.filter((s) => DAC.cuenta(s).slice(0, 10) >= d && DAC.cuenta(s).slice(0, 10) <= h
     && (!S.producto || s.producto === S.producto) && (!S.tipo || s.tipo_credito === S.tipo));
   const filaSol = (s) => ({ solicitud: s.solicitud, producto: s.producto, tipo_credito: s.tipo_credito, tipo: s.reestructura ? 'Reestructura' : '', inicio: s.ingreso_dac, estado_hoy: s.ultimo_estado || s.estado_actual });
 
@@ -445,11 +444,11 @@
     const nVarias = new Set(varias.map((t) => t.solicitud)).size;
     return `<div class="nota"><b>Cuadre de ${mesTxt(S.mes)}:</b> ${n0(sols.length)} solicitudes DAC (Dashboard)
       − ${conLista(reest.length, 'Reestructuras (no se mide tiempo)', reest.map(filaSol))} reestructuras
-      − ${conLista(sinCaso.length, 'Sin tramo de análisis cerrado', sinCaso.map(filaSol))} sin tramo de análisis cerrado (en cola o en análisis al corte)
+      − ${conLista(sinCaso.length, 'Sin tramo de análisis cerrado', sinCaso.map(filaSol))} sin tramo de análisis cerrado (en cola o en análisis)
       = <b>${n0(casos)}</b> casos en <i>Tiempo de la solicitud</i>.<br>
       <i>Tramos por analista</i> cuenta tramos, no solicitudes: ${n0(tr.length)} tramos de ${n0(porSol.size)} solicitudes, porque
       ${conLista(nVarias, 'Solicitudes con más de un tramo', varias.map(filaTramo))} solicitudes tuvieron más de un tramo (reasignadas, devueltas a la cola, o pre análisis y luego análisis).
-      Los tramos se cuentan en el mes en que empezaron.</div>`;
+      Los tramos se cuentan en el mes de la última resolución de su solicitud.</div>`;
   }
 
   function tiempos() {
@@ -484,7 +483,7 @@
       Solicitudes: sols.map((s) => { const g = C.global(s); return { Solicitud: s.solicitud, Producto: s.producto, 'Tipo de crédito': s.tipo_credito, Reestructura: s.reestructura ? 'Sí' : 'No',
         Creada: s.creada, 'Ingreso al DAC': s.ingreso_dac, 'Analista del caso': g ? g.analista : null, 'Tiempo de la solicitud (min)': g ? min2(g.segundos) : null,
         'Meta (min)': metas()[s.producto], 'En meta': g && g.segundos != null ? (g.segundos <= metas()[s.producto] * 60 ? 'Sí' : 'No') : null,
-        'Última decisión': s.decision, 'Fecha decisión': s.fecha_decision, 'Creación a decisión (h)': s.segundos_total == null ? null : Math.round(s.segundos_total / 36) / 100,
+        'Última decisión': s.decision, 'Fecha decisión': s.fecha_decision, 'Cuenta en el mes': DAC.cuenta(s).slice(0, 7),'Creación a decisión (h)': s.segundos_total == null ? null : Math.round(s.segundos_total / 36) / 100,
         'Estado hoy': s.ultimo_estado || s.estado_actual, Promotor: s.promotor, Sucursal: s.sucursal }; }),
       Tramos: tr.map((t) => ({ ...xlsFila(filaTramo(t)), Tramo: t.n, ...Object.fromEntries(Object.entries(t.estados || {}).map(([e, v]) => [`${e} (min)`, min2(v[C.cfg.modo_tiempo === 'jornada' ? 1 : 0])])) })),
     });
@@ -497,13 +496,12 @@
       const s = S.C.solPorId.get(id), tr = S.C.tramosPorSol.get(id) || [];
       const yo = soloYo();
       const fr = S.D.flujo_rapido.find((x) => x.solicitud === id);
-      const fuera = S.D.fueraDeMes.find((x) => x.solicitud === id);
       if (fr && !yo) cuerpo = `<p>Es de <b>Flujo Rápido</b>: ${esc(fr.resolucion)} el ${fh(fr.fecha_resolucion)} y siguió sin pasar por un analista. Estado hoy: ${esc(fr.ultimo_estado || fr.estado_actual || '—')}.</p>`;
-      else if (fuera && !yo) cuerpo = `<p class="muted">Se creó el ${fh(fuera.creada)} y entró al DAC el ${fh(fuera.ingreso_dac)}, en otro mes: no se cuenta como ingreso.</p>`;
       else if (!s || (yo && !tr.some((t) => t.analista === yo))) cuerpo = '<p class="muted">No está en el universo DAC cargado (no pasó por POR ASIGNAR A ANALISTA).</p>';
       else {
         const g = S.C.global(s);
-        cuerpo = `<p class="small">${prodTag(s.producto)} · ${esc(s.tipo_credito || '')} · ${s.reestructura ? '<b>Reestructura</b> (no se mide tiempo) · ' : ''}Ingresó al DAC ${fh(s.ingreso_dac)} · Estado hoy: ${esc(s.ultimo_estado || s.estado_actual || '—')}<br>
+        cuerpo = `<p class="small">${prodTag(s.producto)} · ${esc(s.tipo_credito || '')} · ${s.reestructura ? '<b>Reestructura</b> (no se mide tiempo) · ' : ''}Ingresó al DAC ${fh(s.ingreso_dac)}${DAC.mismoMes(s) ? '' : ` (creada el ${fh(s.creada)}, en otro mes: no cuenta como ingreso)`} · Estado hoy: ${esc(s.ultimo_estado || s.estado_actual || '—')}<br>
+          Tiempos y productividad en <b>${mesTxt(DAC.cuenta(s).slice(0, 7))}</b> (${s.decision ? `última resolución ${esc(s.decision)} el ${fh(DAC.cuenta(s))}` : 'sin resolución: último mes con un estado del DAC'})<br>
           Tiempo de la solicitud: <b>${dur(g && g.segundos)}</b> (meta ${metas()[s.producto]} min) · le queda a <b>${esc(titulo(g && g.analista))}</b> · De la creación a la última decisión: ${dur(s.segundos_total)}</p>
           <div class="tabla"><table><thead><tr><th>#</th><th>Tipo</th><th>Analista</th><th>Inicio</th><th>Fin</th><th>Termina en</th><th class="num">Tiempo</th><th>Detalle por estado (reloj · jornada)</th></tr></thead><tbody>
           ${tr.map((t) => `<tr><td>${t.n}</td><td>${t.tipo === 'analisis' ? 'Análisis' : 'Preaprobado condicionado'}</td><td>${esc(titulo(t.analista))}</td><td>${fh(t.inicio)}</td><td>${fh(t.fin)}</td><td>${esc(t.fin_estado)}</td><td class="num"><b>${dur(S.C.segundosTramo(t))}</b></td>
@@ -609,7 +607,7 @@
     const d = P.desde, h = P.hasta, esMes = S.dgran === 'mes', nomP = esMes ? mesTxt(S.mes) : P.nom;
     const med = S.cmed || (S.C.cfg.modo_tiempo === 'jornada' ? 'jornada' : 'reloj'), k = med === 'jornada' ? 1 : 0;
     const enP = (f) => f && f.slice(0, 10) >= d && f.slice(0, 10) <= h;
-    const base = [...S.D.solicitudes.map((s) => ({ c: 'dac', s })), ...S.D.fueraDeMes.map((s) => ({ c: 'dac', s })), ...S.D.flujo_rapido.map((s) => ({ c: 'rapido', s }))]
+    const base = [...S.D.solicitudes.map((s) => ({ c: 'dac', s })), ...S.D.flujo_rapido.map((s) => ({ c: 'rapido', s }))]
       .filter((x) => x.s.ciclo && enP(x.s.creada) && (S.camino === 'todas' || x.c === S.camino) && (!S.producto || x.s.producto === S.producto)
         && (S.cfin === 'todas' || (S.cfin === 'final') === !!x.s.ciclo.final));
     const it = base.map((x) => {
@@ -677,7 +675,7 @@
     const k = (S.cmed || (S.C.cfg.modo_tiempo === 'jornada' ? 'jornada' : 'reloj')) === 'jornada' ? 1 : 0;
     const { P } = periodoDash();
     const enP = (f) => f && f.slice(0, 10) >= P.desde && f.slice(0, 10) <= P.hasta;
-    const filas = [...S.D.solicitudes.map((s) => ['DAC', s]), ...S.D.fueraDeMes.map((s) => ['DAC', s]), ...S.D.flujo_rapido.map((s) => ['Flujo Rápido', s])]
+    const filas = [...S.D.solicitudes.map((s) => ['DAC', s]), ...S.D.flujo_rapido.map((s) => ['Flujo Rápido', s])]
       .filter(([, s]) => s.ciclo && enP(s.creada)).map(([c, s]) => {
         const o = { Solicitud: s.solicitud, Camino: c, Producto: s.producto, 'Tipo de crédito': s.tipo_credito, Creada: s.creada, Fin: s.ciclo.t_fin,
           'Último estado del ciclo': s.ciclo.fin, Finalizada: s.ciclo.final ? 'Sí' : 'No', 'Total (h)': 0, 'DAC (h)': 0, 'Comercial (h)': 0 };
@@ -735,7 +733,7 @@
     return `${filtros({ producto: false })}
       <div class="card"><h3>Departamento de Análisis · ${mesTxt(S.mes)}</h3>
         <p class="muted small">${notaHoy(M)}</p>
-        <div class="nota">Productividad del producto = solicitudes del producto que pasaron por POR ASIGNAR A ANALISTA ÷ días hábiles ÷ analistas del producto
+        <div class="nota">Productividad del producto = solicitudes del producto que pasaron por POR ASIGNAR A ANALISTA y cuentan en el mes (el de su última resolución) ÷ días hábiles ÷ analistas del producto
           (contados por su disponibilidad: si alguien tuvo vacaciones, cuenta solo por los días que estuvo).
           Productividad del departamento = promedio de la productividad de cada producto, ponderado por su peso en solicitudes.</div>
         <div class="tabla"><table><thead><tr><th>Producto</th><th class="num">Solicitudes</th><th class="num">Peso</th><th class="num">Días hábiles</th><th class="num">Solicitudes por día</th><th class="num">Analistas</th><th class="num">Analistas disponibles</th><th class="num">Productividad</th><th class="num">Tiempo mediano</th><th class="num">Meta</th><th class="num">En meta</th></tr></thead><tbody>
@@ -810,15 +808,18 @@
     const ult = S.D.config.ultima_actualizacion;
     if (!S.D.solicitudes.some((s) => s.ultimo_estado)) return `<div class="card nota alerta">La cartera actual necesita el estado en que está hoy cada solicitud. Se llena en la próxima actualización, después de ejecutar <b>supabase/migracion_2026_10_23.sql</b> en Supabase.</div>`;
     // Último tramo abierto de cada solicitud: a quién le está quedando
+    // Solo lo que trae la actualización (creado este mes o el anterior); lo más antiguo sin decisión no es cartera actual
+    const hoyF = new Date(), desdeCartera = DAC.iso(new Date(hoyF.getFullYear(), hoyF.getMonth() - 1, 1));
+    const enCartera = (s) => !s.creada || s.creada.slice(0, 10) >= desdeCartera;
     const abiertos = new Map();
     for (const t of S.D.tramos) {
-      if (t.fin || !C.solPorId.has(t.solicitud)) continue;
+      if (t.fin || !C.solPorId.has(t.solicitud) || !enCartera(C.solPorId.get(t.solicitud))) continue;
       const a = abiertos.get(t.solicitud);
       if (!a || t.n > a.n) abiertos.set(t.solicitud, t);
     }
     const fila = (s, t) => ({ solicitud: s.solicitud, producto: s.producto, tipo_credito: s.tipo_credito, tipo: t ? (t.tipo === 'analisis' ? 'Análisis' : 'Preaprobado condicionado') : 'En cola',
       analista: t && t.analista, inicio: t ? t.inicio : s.ingreso_dac, fin_estado: '', estado_hoy: `${s.ultimo_estado} desde ${fh(s.ultimo_cambio)} (${espera(s.ultimo_cambio)})` });
-    const cola = S.D.solicitudes.filter((s) => s.ultimo_estado === POR_ASIGNAR).sort((a, b) => String(a.ultimo_cambio).localeCompare(String(b.ultimo_cambio)));
+    const cola = S.D.solicitudes.filter((s) => s.ultimo_estado === POR_ASIGNAR && enCartera(s)).sort((a, b) => String(a.ultimo_cambio).localeCompare(String(b.ultimo_cambio)));
     const porAn = new Map();
     for (const [id, t] of abiertos) {
       const s = C.solPorId.get(id);
@@ -842,7 +843,7 @@
         <div class="kpi naranja"><div class="l">Preaprobado condicionado</div><div class="v">${n0(todos.filter((o) => o.s.ultimo_estado === 'PREAPROBADO CONDICIONADO').length)}</div><div class="s">esperando al promotor o en reproceso</div></div>
       </div>
       <div class="card"><h3>Solicitudes que tiene cada analista</h3>
-        <p class="muted small">Solicitudes del DAC que el analista tiene abiertas (asignada y todavía sin decisión), con el estado en que están hoy. Clic en una cantidad para ver las solicitudes. Las de meses anteriores ya se cerraron al corte de su mes y no aparecen.</p>
+        <p class="muted small">Solicitudes del DAC que el analista tiene abiertas (asignada y todavía sin decisión), con el estado en que están hoy. Clic en una cantidad para ver las solicitudes. Solo solicitudes creadas este mes o el anterior (las que trae la actualización).</p>
         <div class="tabla"><table><thead><tr><th>Analista</th><th class="num">Total</th>${COLS.map((c) => `<th class="num">${titulo(c)}</th>`).join('')}<th class="num">Otros estados</th></tr></thead><tbody>
         ${filasAn.map(([k, l]) => `<tr><td>${S.C.esAnalista.has(k) ? nombreAnalista(k) : esc(titulo(k))}</td>${celda(k, l, null)}${COLS.map((c) => celda(k, l, c)).join('')}${celda(k, l, '')}</tr>`).join('') || '<tr><td colspan="7" class="muted">Ninguna solicitud abierta</td></tr>'}
         ${filasAn.length > 1 ? `<tr class="total"><td>Total</td>${celda('Total', todos, null)}${COLS.map((c) => celda('Total', todos, c)).join('')}${celda('Total', todos, '')}</tr>` : ''}</tbody></table></div></div>

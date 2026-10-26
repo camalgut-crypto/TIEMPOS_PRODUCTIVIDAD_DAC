@@ -1,7 +1,7 @@
 SELECT * FROM dwh.vw_historico_solicitud_pais
 WHERE ID_PAIS = 2
 AND [FECHA CREACION]>= DATEADD(
-        MONTH, 0,
+        MONTH, -1,
         DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1)
     )
 ORDER BY [SOLICITUD], [FECHA MODIFICACION] ASC;

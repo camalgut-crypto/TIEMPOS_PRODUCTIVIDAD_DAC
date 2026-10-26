@@ -24,7 +24,6 @@ from tiempos_dac.conexion import RAIZ, consultar, leer_config  # noqa: E402
 from tiempos_dac.motor import Jornada, calcular, flujo_rapido, resumen_bitacora, tiempos_motor, usuarios_dac  # noqa: E402
 
 LOG = RAIZ / "worker" / "logs" / "actualizar.log"
-DIAS_CIERRE = 5  # los primeros días del mes se vuelve a leer el mes anterior para cerrarlo al corte
 # Jefatura del DAC (personal del DAC para el ciclo por departamento; se puede cambiar en dac_config.jefatura)
 JEFATURA = ["HILCIA PAOLA MORALES MENDEZ", "KATHERINE GISSELL MORA GARCIA"]
 
@@ -46,11 +45,6 @@ def _registros(df: pd.DataFrame) -> list[dict]:
 def procesar(cfg: dict, jornada: Jornada, personal_dac: set[str], historico: bool = False) -> dict:
     sql = {k: (RAIZ / v).read_text(encoding="utf-8-sig")
            for k, v in cfg["consultas_historico" if historico else "consultas"].items()}
-    if not historico and date.today().day <= DIAS_CIERRE:
-        # Las consultas traen lo creado desde el día 1 del mes; en memoria (sin tocar los archivos) se amplían
-        # al mes anterior para que sus solicitudes queden cerradas al corte de fin de mes.
-        sql = {k: v.replace("MONTH, 0", "MONTH, -1") for k, v in sql.items()}
-        logging.info("Primeros días del mes: se incluye el mes anterior para cerrarlo")
     t0 = reloj.time()
     bit = consultar(cfg["servidor"], sql["bitacora"])
     his = consultar(cfg["servidor"], sql["historico"])
@@ -69,7 +63,7 @@ def procesar(cfg: dict, jornada: Jornada, personal_dac: set[str], historico: boo
     sol["periodo"] = sol["ingreso_dac"].dt.strftime("%Y-%m")
     sol = sol[["solicitud", "periodo", "creada", "ingreso_dac", "tipo_credito", "producto", "reestructura",
                "monto_colocado", "monto_aprobado", "estado_actual", "promotor", "sucursal", "decision", "fecha_decision",
-               "segundos_total", "ultimo_estado", "ultimo_cambio", "ultimo_usuario", "ciclo"]]
+               "segundos_total", "fecha_cuenta", "ultimo_estado", "ultimo_cambio", "ultimo_usuario", "ciclo"]]
     rap = flujo_rapido(his, bit, jornada, personal=personal)
     res = resumen_bitacora(bit, set(sol["solicitud"]), set(rap["solicitud"]))
     mot, lentas = tiempos_motor(his, bit, set(sol["solicitud"]), set(rap["solicitud"]))

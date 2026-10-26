@@ -175,11 +175,15 @@
   }
 
   // ---------- Métricas de un período ----------
+  // Tiempos y productividad: la solicitud se cuenta completa en el mes de su última decisión; sin decisión, en el último
+  // mes en que tuvo un estado del DAC (indicado por el usuario 26-oct). Los ingresos siguen por la fecha de ingreso al DAC.
+  const cuenta = (s) => s.fecha_cuenta || s.fecha_decision || s.ultimo_cambio || s.ingreso_dac;
   function metricas(C, D, desde, hasta, filtro = {}) {
     const enRango = (f) => f && f.slice(0, 10) >= desde && f.slice(0, 10) <= hasta;
     const pasa = (s) => (!filtro.producto || s.producto === filtro.producto) && (!filtro.tipo || s.tipo_credito === filtro.tipo)
       && (!filtro.pred || filtro.pred(s));
-    const sols = D.solicitudes.filter((s) => enRango(s.ingreso_dac) && pasa(s));
+    const sols = D.solicitudes.filter((s) => enRango(cuenta(s)) && pasa(s));
+    const ingresos = D.solicitudes.filter((s) => enRango(s.ingreso_dac) && mismoMes(s) && pasa(s));
     const dh = C.diasHabiles(desde, hasta);
 
     // Departamento y producto
@@ -203,9 +207,9 @@
     // Por analista: cada solicitud cuenta para cada analista que intervino (aunque sea de otro producto)
     const part = new Map();
     for (const t of D.tramos) {
-      if (!t.analista || !enRango(t.inicio)) continue;
+      if (!t.analista) continue;
       const s = C.solPorId.get(t.solicitud);
-      if (!s || !pasa(s)) continue;
+      if (!s || !enRango(cuenta(s)) || !pasa(s)) continue;
       if (!part.has(t.analista)) part.set(t.analista, { sols: new Set(), propio: new Set(), otros: new Set(), reproceso: new Set(), analisis: new Set() });
       const p = part.get(t.analista);
       p.sols.add(s.solicitud);
@@ -230,7 +234,7 @@
     }
     const sinConfigurar = [...part.keys()].filter((n) => !C.esAnalista.has(n))
       .map((n) => ({ nombre: n, n: part.get(n).sols.size }));
-    return { sols, depto, porProducto, porAnalista, sinConfigurar };
+    return { sols, ingresos, depto, porProducto, porAnalista, sinConfigurar };
   }
 
   // ---------- Distribución de tiempos ----------
@@ -250,7 +254,7 @@
     return { n, prom: n ? v.reduce((a, b) => a + b, 0) / n : null, mediana: n ? v[Math.floor((n - 1) / 2)] : null,
       enMeta: n ? it.filter((x) => x.s <= lim(x)).length / n : null, dist };
   }
-  // Casos de reprocesamiento cerrados que empezaron en el período (un caso por solicitud)
+  // Casos de reprocesamiento cerrados de las solicitudes que cuentan en el período (un caso por solicitud)
   function reprocesos(C, D, desde, hasta, filtro = {}) {
     const ids = new Set();
     for (const t of D.tramos) if (t.tipo === 'reproceso') ids.add(t.solicitud);
@@ -260,7 +264,8 @@
       if (!s || s.reestructura || (filtro.producto && s.producto !== filtro.producto) || (filtro.tipo && s.tipo_credito !== filtro.tipo)
         || (filtro.pred && !filtro.pred(s))) continue;
       const r = C.reprocesoDe(id);
-      if (!r || r.abierto || r.inicio.slice(0, 10) < desde || r.inicio.slice(0, 10) > hasta) continue;
+      const f = cuenta(s).slice(0, 10);
+      if (!r || r.abierto || f < desde || f > hasta) continue;
       out.push(r);
     }
     return out;
@@ -269,15 +274,15 @@
   const mismoMes = (s) => !s.creada || s.creada.slice(0, 7) === s.ingreso_dac.slice(0, 7);
   // Semana del mes (W1 = del día 1 al primer domingo)
   const semanaMes = (f) => { const d = fecha(f), off = (new Date(d.getFullYear(), d.getMonth(), 1).getDay() + 6) % 7; return Math.floor((d.getDate() - 1 + off) / 7) + 1; };
-  // Tramos de un tipo en el período (sin reestructuras: a ellas no se les miden tiempos)
+  // Tramos de un tipo de las solicitudes que cuentan en el período (sin reestructuras: a ellas no se les miden tiempos)
   function tramosPeriodo(C, D, tipo, desde, hasta, filtro = {}) {
     return D.tramos.filter((t) => {
-      if (t.tipo !== tipo || !t.fin || t.inicio.slice(0, 10) < desde || t.inicio.slice(0, 10) > hasta) return false;
-      const s = C.solPorId.get(t.solicitud);
-      return s && !s.reestructura && (!filtro.producto || s.producto === filtro.producto) && (!filtro.tipo || s.tipo_credito === filtro.tipo);
+      if (t.tipo !== tipo || !t.fin) return false;
+      const s = C.solPorId.get(t.solicitud), f = s && cuenta(s).slice(0, 10);
+      return s && f >= desde && f <= hasta && !s.reestructura && (!filtro.producto || s.producto === filtro.producto) && (!filtro.tipo || s.tipo_credito === filtro.tipo);
     });
   }
 
   window.DAC = { PRODUCTOS, RANGOS, METAS, slug, iso, fecha, sumarDias, dias, feriadosPropuestos, contexto, metricas,
-    resumenTiempos, tramosPeriodo, mismoMes, semanaMes, reprocesos };
+    resumenTiempos, tramosPeriodo, mismoMes, cuenta, semanaMes, reprocesos };
 })();

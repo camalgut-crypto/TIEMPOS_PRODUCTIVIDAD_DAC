@@ -8,8 +8,9 @@ Reglas (definidas por el usuario, aplicadas literalmente):
 - Tramo de reprocesamiento: inicia en PREAPROBADO CONDICIONADO y termina con la decisión del analista
   que retoma la solicitud (a ese analista se le asigna el reprocesamiento).
 - Tiempo de la solicitud (global): el del último tramo de análisis; el caso queda a ese analista.
-- Corte de mes: la solicitud pertenece al mes en que ingresó al DAC y se mide solo hasta el cierre de ese mes;
-  lo que quede abierto se cierra en el corte (ej. entra 31 a las 13:50, va a análisis 13:55 → 5 min).
+- Mes de tiempos y productividad (26-oct): sin corte de mes; la solicitud se cuenta completa en el mes de su última
+  decisión. Sin decisión, en el último mes en que tuvo un estado del DAC (si hoy está en uno, en el mes en curso).
+  Los ingresos siguen contándose por la fecha de ingreso al DAC.
 - Producto: PYMES, MOTO; todo lo demás es PERS. Reestructura: Monto Colocado 0 o 1 (no se miden tiempos,
   pero sí cuentan para productividad).
 """
@@ -28,7 +29,6 @@ PREAPROBADO = "PREAPROBADO CONDICIONADO"
 MOTOR = {"APROBADO POR MOTOR", "RECHAZADO POR MOTOR"}
 # Decisiones que cierran el ciclo del analista (RECHAZADO POR RECEPCION / RESOLUCION: indicado por el usuario 22-oct)
 DECISION = {"APROBADO POR ANALISTA", "RECHAZADO POR ANALISTA", "RECHAZADO POR RECEPCION", "RECHAZADO RESOLUCION"}
-CORTE = "CORTE DE MES"
 
 
 def es_tud(estado: str) -> bool:
@@ -108,15 +108,9 @@ def tramos_solicitud(sol: int, filas: list[dict], jornada: Jornada) -> list[dict
     tramos = []
     ana = None    # (analista, índice de inicio) del tramo de análisis abierto
     rep = None    # índice de inicio del reprocesamiento abierto
+    cola = False  # está en POR ASIGNAR sin que nadie la haya tomado
     for i, f in enumerate(filas):
         est, usr = f["estado"], f["usuario"]
-        if est == CORTE:
-            if rep is not None:
-                quien = next((g["usuario"] for g in filas[rep + 1:i] if g["estado"] == EN_ANALISIS), None)
-                tramos.append(_tramo(sol, "reproceso", quien, filas, rep, i, CORTE, jornada))
-            if ana is not None:
-                tramos.append(_tramo(sol, "analisis", _quien(filas, ana, i), filas, ana[1], i, CORTE, jornada))
-            return tramos
         if rep is not None and i > rep:
             if est in DECISION or es_tud(est) or est in (PRE_ANALISIS, PREAPROBADO, ASIGNADO, POR_ASIGNAR):
                 # El reprocesamiento es de quien retoma: el que decide, o el primero que lo pone EN ANALISIS.
@@ -136,7 +130,12 @@ def tramos_solicitud(sol: int, filas: list[dict], jornada: Jornada) -> list[dict
                 tramos.append(_tramo(sol, "analisis", _quien(filas, ana, i), filas, ana[1], i, est, jornada))
                 ana = None
         if est == ASIGNADO:
-            ana = (usr, i)
+            ana, cola = (usr, i), False
+        elif est == POR_ASIGNAR:
+            cola = True
+        elif est == EN_ANALISIS and cola and ana is None and rep is None:
+            # El analista la toma de la cola sin registrar ANALISTA ASIGNADO (ej. 1179971): el tramo inicia en EN ANALISIS
+            ana, cola = (usr, i), False
         if est == PREAPROBADO and rep is None:
             rep = i
     if ana is not None:
@@ -227,6 +226,13 @@ def ciclo(filas: list[dict], personal: set[str], jornada: Jornada, ahora: dateti
             "est": {k: [round(v[0]), round(v[1])] for k, v in est.items()}}
 
 
+def _ultimo_dac(filas: list[dict], personal: set[str], ahora: datetime):
+    """Solicitud sin decisión: última fecha en que estuvo en un estado del DAC (hoy, si sigue en uno).
+    Ej.: queda en PENDIENTES el 30-sep y el 2-oct pasa a EN ANALISIS → cuenta en octubre (indicado por el usuario 26-oct)."""
+    k = max(i for i, f in enumerate(filas) if depto(f["estado"], f["usuario"], personal) == "DAC")
+    return filas[k + 1]["t"] if k + 1 < len(filas) else pd.Timestamp(ahora)
+
+
 def calcular(historico: pd.DataFrame, bitacora: pd.DataFrame,
              jornada: Jornada | None = None, ahora: datetime | None = None,
              personal: set[str] | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -242,12 +248,9 @@ def calcular(historico: pd.DataFrame, bitacora: pd.DataFrame,
     tramos, sols = [], []
     for sol, g in h.groupby("sol", sort=False):
         filas = g[["estado", "usuario", "t"]].to_dict("records")
-        ultimo_cambio = filas[-1]  # estado en que está hoy (para la cartera actual), sin el corte de mes
+        ultimo_cambio = filas[-1]  # estado en que está hoy (para la cartera actual)
         ciclo_sol = ciclo(filas, personal, jornada, ahora)
         ingreso = next(f["t"] for f in filas if f["estado"] == POR_ASIGNAR)
-        corte = datetime(ingreso.year + ingreso.month // 12, ingreso.month % 12 + 1, 1)
-        if corte <= ahora:  # mes cerrado: lo posterior al corte no cuenta
-            filas = [f for f in filas if f["t"] < corte] + [{"estado": CORTE, "usuario": "", "t": pd.Timestamp(corte)}]
         tr = tramos_solicitud(int(sol), filas, jornada)
         tramos.extend(tr)
         cerrados = [x for x in tr if x["tipo"] == "analisis" and x["fin"] is not None]
@@ -278,6 +281,7 @@ def calcular(historico: pd.DataFrame, bitacora: pd.DataFrame,
             "decision": decisiones[-1]["estado"] if decisiones else None,
             "fecha_decision": decisiones[-1]["t"] if decisiones else None,
             "segundos_total": ((decisiones[-1]["t"] - g["t"].iloc[0]).total_seconds() if decisiones else None),
+            "fecha_cuenta": decisiones[-1]["t"] if decisiones else _ultimo_dac(filas, personal, ahora),
             "n_analistas": len({x["analista"] for x in tr if x["analista"]}),
             "ciclo": ciclo_sol,
         })
