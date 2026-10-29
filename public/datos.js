@@ -15,13 +15,18 @@
   const sb = local ? null : window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY);
   const ok = ({ data, error }) => { if (error) throw new Error(error.message); return data; };
 
+  // Supabase entrega hasta 1000 filas por llamada: la primera trae el total y el resto se pide en paralelo
+  // (el Flujo Rápido trae todas las resoluciones del motor, unas 7 mil por mes)
   async function todo(tabla, orden) {
-    const out = [];
-    for (let i = 0; ; i += 1000) {
-      const lote = ok(await sb.from(tabla).select('*').order(orden).range(i, i + 999));
-      out.push(...lote);
-      if (lote.length < 1000) return out;
+    const r = await sb.from(tabla).select('*', { count: 'exact' }).order(orden).range(0, 999);
+    const out = ok(r), total = r.count ?? out.length;
+    const pags = [];
+    for (let i = 1000; i < total; i += 1000) pags.push(i);
+    for (let k = 0; k < pags.length; k += 8) {
+      const lotes = await Promise.all(pags.slice(k, k + 8).map((i) => sb.from(tabla).select('*').order(orden).range(i, i + 999)));
+      for (const l of lotes) out.push(...ok(l));
     }
+    return out;
   }
 
   const nube = {

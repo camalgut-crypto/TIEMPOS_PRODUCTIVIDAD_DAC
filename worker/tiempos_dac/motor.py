@@ -11,8 +11,8 @@ Reglas (definidas por el usuario, aplicadas literalmente):
 - Mes de tiempos y productividad (26-oct): sin corte de mes; la solicitud se cuenta completa en el mes de su última
   decisión. Sin decisión, en el último mes en que tuvo un estado del DAC (si hoy está en uno, en el mes en curso).
   Los ingresos siguen contándose por la fecha de ingreso al DAC.
-- Producto: PYMES, MOTO; todo lo demás es PERS. Reestructura: Monto Colocado 0 o 1 (no se miden tiempos,
-  pero sí cuentan para productividad).
+- Producto: PYMES, MOTO; todo lo demás es PERS. Reestructura: Monto Colocado 0 o 1 (desde el 29-oct también se
+  les miden tiempos, con la meta de su producto; cuentan para productividad).
 """
 from __future__ import annotations
 
@@ -300,9 +300,9 @@ def _resolucion_motor(g: pd.DataFrame):
 
 def flujo_rapido(historico: pd.DataFrame, bitacora: pd.DataFrame, jornada: Jornada | None = None,
                  ahora: datetime | None = None, personal: set[str] | None = None) -> pd.DataFrame:
-    """Flujo Rápido (motor de decisiones): solicitudes con resolución del motor (aprobado o rechazado por motor)
-    que después siguieron a otro estado (formalizado, TUD, anulado, pre análisis, etc.) sin pasar por
-    POR ASIGNAR A ANALISTA. Es del motor aunque la jefatura haya intervenido (indicado por el usuario 23-oct);
+    """Flujo Rápido (motor de decisiones): toda solicitud con resolución del motor (aprobado o rechazado por motor)
+    que no pasó por POR ASIGNAR A ANALISTA, haya seguido o no a otro estado (indicado por el usuario 29-oct; antes
+    se exigía un estado posterior). Es del motor aunque la jefatura haya intervenido (indicado por el usuario 23-oct);
     no cuenta en los tiempos ni en la productividad del DAC."""
     jornada = jornada or Jornada()
     ahora = ahora or datetime.now()
@@ -315,7 +315,7 @@ def flujo_rapido(historico: pd.DataFrame, bitacora: pd.DataFrame, jornada: Jorna
         if POR_ASIGNAR in est:
             continue
         i, seg = _resolucion_motor(g)
-        if i is None or not any(e not in MOTOR for e in est[i + 1:]):
+        if i is None:
             continue
         i_ = info.loc[sol] if sol in info.index else None
         tc = (i_["tipo_credito"] if i_ is not None else None) or ""

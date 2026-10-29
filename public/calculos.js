@@ -3,7 +3,7 @@
 (function () {
   const PRODUCTOS = ['PERS', 'PYMES', 'MOTO'];
   const RANGOS = [1, 2, 3, 4, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 60, 90, 240];
-  const METAS = { PERS: 20, MOTO: 40, PYMES: 50 }; // minutos; se cambian en Administración
+  const METAS = { PERS: 20, MOTO: 30, PYMES: 40 }; // minutos; se cambian en Administración
 
   const slug = (s) => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
     .trim().replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '');
@@ -261,7 +261,7 @@
     const out = [];
     for (const id of ids) {
       const s = C.solPorId.get(id);
-      if (!s || s.reestructura || (filtro.producto && s.producto !== filtro.producto) || (filtro.tipo && s.tipo_credito !== filtro.tipo)
+      if (!s || (filtro.producto && s.producto !== filtro.producto) || (filtro.tipo && s.tipo_credito !== filtro.tipo)
         || (filtro.pred && !filtro.pred(s))) continue;
       const r = C.reprocesoDe(id);
       const f = cuenta(s).slice(0, 10);
@@ -274,12 +274,12 @@
   const mismoMes = (s) => !s.creada || s.creada.slice(0, 7) === s.ingreso_dac.slice(0, 7);
   // Semana del mes (W1 = del día 1 al primer domingo)
   const semanaMes = (f) => { const d = fecha(f), off = (new Date(d.getFullYear(), d.getMonth(), 1).getDay() + 6) % 7; return Math.floor((d.getDate() - 1 + off) / 7) + 1; };
-  // Tramos de un tipo de las solicitudes que cuentan en el período (sin reestructuras: a ellas no se les miden tiempos)
+  // Tramos de un tipo de las solicitudes que cuentan en el período (con reestructuras: se miden desde el 29-oct)
   function tramosPeriodo(C, D, tipo, desde, hasta, filtro = {}) {
     return D.tramos.filter((t) => {
       if (t.tipo !== tipo || !t.fin) return false;
       const s = C.solPorId.get(t.solicitud), f = s && cuenta(s).slice(0, 10);
-      return s && f >= desde && f <= hasta && !s.reestructura && (!filtro.producto || s.producto === filtro.producto) && (!filtro.tipo || s.tipo_credito === filtro.tipo);
+      return s && f >= desde && f <= hasta && (!filtro.producto || s.producto === filtro.producto) && (!filtro.tipo || s.tipo_credito === filtro.tipo);
     });
   }
 

@@ -318,7 +318,7 @@ end $$;
 
 -- Metas por producto (minutos) y jefatura del DAC (no es Flujo Rápido si interviene)
 insert into public.dac_config (clave, valor) values
-  ('metas', '{"PERS": 20, "MOTO": 40, "PYMES": 50}'),
+  ('metas', '{"PERS": 20, "MOTO": 30, "PYMES": 40}'),
   ('jefatura', '["HILCIA PAOLA MORALES MENDEZ", "KATHERINE GISSELL MORA GARCIA"]')
 on conflict (clave) do nothing;
 

@@ -20,8 +20,8 @@ Aplicación web en línea (GitHub Pages + Supabase): se abre desde cualquier com
 ## Reglas de cálculo
 
 - **Universo DAC**: solicitudes que pasaron por POR ASIGNAR A ANALISTA. Se cuentan el día y el mes en que ingresaron por primera vez. Si se crearon en un mes y entraron al DAC el siguiente (creada el 31, entra el 1), no se cuentan como ingreso.
-- **Metas de tiempo** (por producto de la solicitud, configurables en Administración): PERS ≤ 20 min, MOTO ≤ 40 min, PYMES ≤ 50 min.
-- **Flujo Rápido (motor de decisiones)**: solicitudes con APROBADO o RECHAZADO POR MOTOR que después siguieron a otro estado (formalizado, TUD, anulado, pre análisis…) sin pasar por POR ASIGNAR A ANALISTA, aunque la jefatura las haya tocado.
+- **Metas de tiempo** (por producto de la solicitud, configurables en Administración): PERS ≤ 20 min, MOTO ≤ 30 min, PYMES ≤ 40 min (29-oct; antes 40 y 50).
+- **Flujo Rápido (motor de decisiones)**: todas las solicitudes con APROBADO o RECHAZADO POR MOTOR que no pasaron por POR ASIGNAR A ANALISTA, hayan seguido o no a otro estado (formalizado, TUD, anulado, pre análisis…), aunque la jefatura las haya tocado (29-oct; antes se exigía un estado posterior).
 - **Capacidad instalada**: con el presupuesto de colocación y el % por producto, y la historia del mes, trimestre o semestre anterior (ticket promedio de los colocados, solicitudes DAC por crédito colocado, tiempo del caso más preaprobado condicionado y productividad), calcula los analistas necesarios por producto. La bitácora de cada mes se guarda resumida en `dac_bitacora_resumen` y no se pierde al cambiar de mes.
 - **Tramo del analista**: empieza en ANALISTA ASIGNADO y termina en APROBADO/RECHAZADO POR ANALISTA, RECHAZADO POR RECEPCION, RECHAZADO RESOLUCION, cualquier TUD, PRE ANALISIS o PREAPROBADO CONDICIONADO. Si el analista toma la solicitud de la cola sin registrar ANALISTA ASIGNADO (POR ASIGNAR → EN ANALISIS), el tramo empieza en ese EN ANALISIS. Es del analista que lo trabaja (primer EN ANALISIS o la decisión), no de quien asignó. No cuentan, como en el Excel, PENDIENTES, VERIFICADOR MOTORIZADO, REVISION APROBADOR, COMITE CREDITO, DEVUELTO GERENCIA y los estados de resolución (configurable en Administración).
 - **Dueño del caso**: quien dio la última decisión; si cierra un preaprobado condicionado, el analista que lo dejó en preaprobado. Sin decisión, el último analista que la tuvo. Un TUD registrado por el promotor es del analista del tramo.
@@ -32,7 +32,7 @@ Aplicación web en línea (GitHub Pages + Supabase): se abre desde cualquier com
 - **Ciclo de la solicitud** (gerente): de la creación a FORMALIZADO (de cara al cliente) o al rechazo, TUD o anulación. Cada estado es del departamento DAC o Comercial; los estados sin departamento fijo son de quien pasó la solicitud a ese estado.
 - **Duración total de la solicitud**: desde su creación hasta la última decisión del analista (aprobado/rechazado por analista o TUD).
 - **Tiempo de la solicitud**: el del tramo del dueño del caso.
-- **Producto**: PYMES, MOTO; el resto es PERS. **Reestructura**: Monto Colocado 0 o 1 (cuenta para productividad, no para tiempos).
+- **Producto**: PYMES, MOTO; el resto es PERS. **Reestructura**: Monto Colocado 0 o 1 (cuenta para productividad y, desde el 29-oct, también para tiempos con la meta de su producto).
 - **Productividad**: solicitudes ÷ días hábiles ÷ analistas (por disponibilidad, descontando vacaciones). Para el analista: solicitudes en que intervino ÷ sus días disponibles (más eventos especiales).
 - **Días hábiles**: lunes a viernes 1, sábado 0.5, domingo 0, feriados 0 (si caen domingo se reponen el lunes).
 

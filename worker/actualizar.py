@@ -82,10 +82,13 @@ def personal_nube(sb) -> set[str]:
 
 
 def cargar_extra(sb, R: dict):
-    """Flujo Rápido, resumen de la bitácora y tiempos del motor; si las tablas aún no existen, se avisa y sigue."""
+    """Flujo Rápido, resumen de la bitácora y tiempos del motor; si las tablas aún no existen, se avisa y sigue.
+    Un mes por llamada: el Flujo Rápido trae todas las resoluciones del motor (unas 7 mil por mes)."""
+    de = lambda k, p: [r for r in R[k] if r["periodo"] == p]
     try:
-        sb.rpc("dac_cargar_extra", {"p_periodos": R["periodos"], "p_flujo": R["flujo"], "p_resumen": R["resumen"],
-                                    "p_motor": R["motor"], "p_lentas": R["lentas"]})
+        for p in R["periodos"]:
+            sb.rpc("dac_cargar_extra", {"p_periodos": [p], "p_flujo": de("flujo", p), "p_resumen": de("resumen", p),
+                                        "p_motor": de("motor", p), "p_lentas": de("lentas", p)})
     except Exception as e:
         logging.warning("No se cargó Flujo Rápido / bitácora / motor (¿falta ejecutar la migración en supabase/?): %s", e)
 

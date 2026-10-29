@@ -228,7 +228,7 @@
     for (let m = d.slice(0, 7); m <= h.slice(0, 7);) { out.push(m); const [y, k] = m.split('-').map(Number); m = DAC.iso(new Date(y, k, 1)).slice(0, 7); }
     return out;
   };
-  const casosDe = (C, sols) => sols.filter((s) => !s.reestructura).map((s) => C.global(s)).filter(Boolean);
+  const casosDe = (C, sols) => sols.map((s) => C.global(s)).filter(Boolean);
   const flujoEn = (d, h) => S.D.flujo_rapido.filter((x) => x.creada && x.creada.slice(0, 10) >= d && x.creada.slice(0, 10) <= h);
 
   // Filtro del dashboard al hacer clic en un día, una hora, una celda del mapa o una semana: "fil|desde|hasta|hora"
@@ -423,7 +423,7 @@
   function notaTiempos() {
     const c = S.C.cfg;
     const j = c.jornada;
-    return `<p class="muted small">Tiempo en <b>${c.modo_tiempo === 'jornada' ? `horas hábiles (L-V ${j.lv[0]}–${j.lv[1]}, sábado ${j.sab[0]}–${j.sab[1]}, más horarios especiales)` : 'hora reloj'}</b>, sin contar: <b>${(c.estados_excluidos || []).join(', ') || 'ningún estado'}</b>. Las reestructuras no se miden. Cada solicitud se mide completa y cuenta en el mes de su última resolución (sin resolución: el último mes en que tuvo un estado del DAC). Meta según el producto de la solicitud: <b>${metaTxt()}</b>. Rangos en minutos (como el Excel: -05 = hasta 5 min). Clic en la cantidad de casos para ver las solicitudes.</p>`;
+    return `<p class="muted small">Tiempo en <b>${c.modo_tiempo === 'jornada' ? `horas hábiles (L-V ${j.lv[0]}–${j.lv[1]}, sábado ${j.sab[0]}–${j.sab[1]}, más horarios especiales)` : 'hora reloj'}</b>, sin contar: <b>${(c.estados_excluidos || []).join(', ') || 'ningún estado'}</b>. Las reestructuras se miden con la meta de su producto. Cada solicitud se mide completa y cuenta en el mes de su última resolución (sin resolución: el último mes en que tuvo un estado del DAC). Meta según el producto de la solicitud: <b>${metaTxt()}</b>. Rangos en minutos (como el Excel: -05 = hasta 5 min). Clic en la cantidad de casos para ver las solicitudes.</p>`;
   }
 
   // Solicitudes que cuentan en el mes (última resolución) con los filtros de la pantalla
@@ -434,16 +434,14 @@
   // Por qué no coinciden las cantidades de las dos vistas y del dashboard
   function cuadre(d, h) {
     const C = S.C, sols = solsMes(d, h);
-    const reest = sols.filter((s) => s.reestructura);
-    const sinCaso = sols.filter((s) => !s.reestructura && !C.global(s));
-    const casos = sols.length - reest.length - sinCaso.length;
+    const sinCaso = sols.filter((s) => !C.global(s));
+    const casos = sols.length - sinCaso.length;
     const tr = DAC.tramosPeriodo(C, S.D, 'analisis', d, h, filtroDatos());
     const porSol = new Map();
     for (const t of tr) porSol.set(t.solicitud, (porSol.get(t.solicitud) || 0) + 1);
     const varias = tr.filter((t) => porSol.get(t.solicitud) > 1);
     const nVarias = new Set(varias.map((t) => t.solicitud)).size;
     return `<div class="nota"><b>Cuadre de ${mesTxt(S.mes)}:</b> ${n0(sols.length)} solicitudes DAC (Dashboard)
-      − ${conLista(reest.length, 'Reestructuras (no se mide tiempo)', reest.map(filaSol))} reestructuras
       − ${conLista(sinCaso.length, 'Sin tramo de análisis cerrado', sinCaso.map(filaSol))} sin tramo de análisis cerrado (en cola o en análisis)
       = <b>${n0(casos)}</b> casos en <i>Tiempo de la solicitud</i>.<br>
       <i>Tramos por analista</i> cuenta tramos, no solicitudes: ${n0(tr.length)} tramos de ${n0(porSol.size)} solicitudes, porque
@@ -462,7 +460,7 @@
       const cruza = tr.filter((t) => t.cruza_dia).length;
       if (cruza && C.cfg.modo_tiempo !== 'jornada') extra = `<div class="nota alerta">${cruza} de ${tr.length} tramos quedan de un día para el otro y en hora reloj cuentan la noche completa. Se puede cambiar a horas hábiles en Administración.</div>`;
     } else {
-      const gl = solsMes(d, h).filter((s) => !s.reestructura).map((s) => C.global(s)).filter((g) => g && (!yo || g.analista === yo));
+      const gl = solsMes(d, h).map((s) => C.global(s)).filter((g) => g && (!yo || g.analista === yo));
       grupos = agrupar(gl, (g) => g.analista, (g) => g).map((g) => ({ nombre: nombreAnalista(g.k), valores: g.valores, filas: g.valores.map((x) => filaTramo(x.tramo)) }));
       titulo2 = 'Tiempo de la solicitud: el del analista a quien le queda el caso';
     }
@@ -496,11 +494,11 @@
       const s = S.C.solPorId.get(id), tr = S.C.tramosPorSol.get(id) || [];
       const yo = soloYo();
       const fr = S.D.flujo_rapido.find((x) => x.solicitud === id);
-      if (fr && !yo) cuerpo = `<p>Es de <b>Flujo Rápido</b>: ${esc(fr.resolucion)} el ${fh(fr.fecha_resolucion)} y siguió sin pasar por un analista. Estado hoy: ${esc(fr.ultimo_estado || fr.estado_actual || '—')}.</p>`;
+      if (fr && !yo) cuerpo = `<p>Es de <b>Flujo Rápido</b>: ${esc(fr.resolucion)} el ${fh(fr.fecha_resolucion)}, sin pasar por un analista. Estado hoy: ${esc(fr.ultimo_estado || fr.estado_actual || '—')}.</p>`;
       else if (!s || (yo && !tr.some((t) => t.analista === yo))) cuerpo = '<p class="muted">No está en el universo DAC cargado (no pasó por POR ASIGNAR A ANALISTA).</p>';
       else {
         const g = S.C.global(s);
-        cuerpo = `<p class="small">${prodTag(s.producto)} · ${esc(s.tipo_credito || '')} · ${s.reestructura ? '<b>Reestructura</b> (no se mide tiempo) · ' : ''}Ingresó al DAC ${fh(s.ingreso_dac)}${DAC.mismoMes(s) ? '' : ` (creada el ${fh(s.creada)}, en otro mes: no cuenta como ingreso)`} · Estado hoy: ${esc(s.ultimo_estado || s.estado_actual || '—')}<br>
+        cuerpo = `<p class="small">${prodTag(s.producto)} · ${esc(s.tipo_credito || '')} · ${s.reestructura ? '<b>Reestructura</b> · ' : ''}Ingresó al DAC ${fh(s.ingreso_dac)}${DAC.mismoMes(s) ? '' : ` (creada el ${fh(s.creada)}, en otro mes: no cuenta como ingreso)`} · Estado hoy: ${esc(s.ultimo_estado || s.estado_actual || '—')}<br>
           Tiempos y productividad en <b>${mesTxt(DAC.cuenta(s).slice(0, 7))}</b> (${s.decision ? `última resolución ${esc(s.decision)} el ${fh(DAC.cuenta(s))}` : 'sin resolución: último mes con un estado del DAC'})<br>
           Tiempo de la solicitud: <b>${dur(g && g.segundos)}</b> (meta ${metas()[s.producto]} min) · le queda a <b>${esc(titulo(g && g.analista))}</b> · De la creación a la última decisión: ${dur(s.segundos_total)}</p>
           <div class="tabla"><table><thead><tr><th>#</th><th>Tipo</th><th>Analista</th><th>Inicio</th><th>Fin</th><th>Termina en</th><th class="num">Tiempo</th><th>Detalle por estado (reloj · jornada)</th></tr></thead><tbody>
@@ -539,6 +537,7 @@
 
   // ---------- Flujo Rápido y motor ----------
   // No cuenta en los tiempos ni en la productividad del DAC: es un bot. Meta del motor: resolver en 1 minuto.
+  // Desde el 29-oct toda resolución del motor que no pasó al DAC es Flujo Rápido; 'otro' queda solo para datos anteriores
   const CAMINO = { dac: 'Pasó al DAC', rapido: 'Flujo Rápido', otro: 'Se quedó en el motor' };
   const segs = (v) => (v == null || !isFinite(v) ? '—' : `${v.toFixed(1)} s`);
   const filaFlujo = (x) => ({ solicitud: x.solicitud, producto: x.producto, tipo_credito: x.tipo_credito, tipo: 'Flujo Rápido', inicio: x.creada,
@@ -569,13 +568,13 @@
         <div class="kpi"><div class="l">Resoluciones del motor</div><div class="v">${n0(T.n)}</div><div class="s">aprobado o rechazado por motor · ${mesTxt(S.mes)}</div></div>
         <div class="kpi ${T.dentro == null || T.dentro >= 0.999 ? 'verde' : 'naranja'}"><div class="l">Dentro de 1 minuto</div><div class="v">${pct(T.dentro)}</div><div class="s">${n0(T.b[4])} tardaron más de 1 min</div></div>
         <div class="kpi cielo"><div class="l">Tiempo promedio</div><div class="v">${segs(T.prom)}</div><div class="s">de ENVIADO a la resolución · máximo ${segs(T.max)}</div></div>
-        <div class="kpi blanco"><div class="l">Flujo Rápido</div><div class="v">${n0(fr.length)}</div><div class="s">resolución del motor que siguió sin pasar por un analista</div></div>
+        <div class="kpi blanco"><div class="l">Flujo Rápido</div><div class="v">${n0(fr.length)}</div><div class="s">resueltas por el motor sin pasar por un analista</div></div>
       </div>
       <div class="card"><h3>Tiempo promedio del motor por día</h3><p class="muted small" style="margin-top:-4px">Segundos de ENVIADO a APROBADO / RECHAZADO POR MOTOR. Meta: menos de 1 minuto. No cuenta en los tiempos ni en la productividad del DAC.</p>
         ${GRAF.columnas(dias, { fmt: (v) => `${(+v).toFixed(1)}`, color: 'var(--navy)' })}</div>
       <div class="grid g2" style="margin-top:14px">
         <div class="card"><h3>Por camino</h3><div class="tabla"><table><thead>${cab}</thead><tbody>
-          ${Object.entries(CAMINO).map(([k, t]) => filaM(t, MR.filter((r) => r.camino === k))).join('')}
+          ${Object.entries(CAMINO).filter(([k]) => k !== 'otro' || MR.some((r) => r.camino === k)).map(([k, t]) => filaM(t, MR.filter((r) => r.camino === k))).join('')}
           ${['APROBADO POR MOTOR', 'RECHAZADO POR MOTOR'].map((e) => filaM(titulo(e), MR.filter((r) => r.resolucion === e))).join('')}</tbody></table></div></div>
         <div class="card"><h3>Por producto</h3><div class="tabla"><table><thead>${cab}</thead><tbody>
           ${DAC.PRODUCTOS.map((p) => filaM(prodTag(p), MR.filter((r) => r.producto === p))).join('')}</tbody></table></div></div>
@@ -585,7 +584,7 @@
           ${lentas.sort((a, b) => b.segundos - a.segundos).map((x) => `<tr><td>${x.solicitud}</td><td>${prodTag(x.producto)}</td><td>${esc(x.resolucion)}</td><td>${CAMINO[x.camino] || ''}</td><td>${fh(x.fecha_resolucion)}</td><td class="num"><b>${segs(Number(x.segundos))}</b></td></tr>`).join('')}</tbody></table></div>`
           : '<p class="muted">Ninguna resolución del motor pasó de 1 minuto en el mes.</p>'}</div>
       <div class="card"><h3>Flujo Rápido · ${mesTxt(S.mes)}</h3>
-        <p class="muted small">Solicitudes con APROBADO o RECHAZADO POR MOTOR que siguieron a otro estado sin pasar por POR ASIGNAR A ANALISTA (también si la jefatura las pasó a pre análisis). Clic en una cantidad para ver las solicitudes.</p>
+        <p class="muted small">Todas las solicitudes con APROBADO o RECHAZADO POR MOTOR que no pasaron por POR ASIGNAR A ANALISTA, hayan seguido o no a otro estado (también si la jefatura las pasó a pre análisis). Clic en una cantidad para ver las solicitudes.</p>
         <p>${['APROBADO POR MOTOR', 'RECHAZADO POR MOTOR'].map((e) => { const l = fr.filter((x) => x.resolucion === e); return `${titulo(e)}: <b>${conLista(l.length, `Flujo Rápido · ${titulo(e)}`, l.map(filaFlujo))}</b>`; }).join(' · ')}
           · Total: <b>${conLista(fr.length, 'Flujo Rápido', fr.map(filaFlujo))}</b></p>
         <div class="tabla"><table><thead><tr><th>Estado hoy</th><th class="num">Solicitudes</th><th class="num">%</th></tr></thead><tbody>
@@ -739,7 +738,7 @@
         <div class="tabla"><table><thead><tr><th>Producto</th><th class="num">Solicitudes</th><th class="num">Peso</th><th class="num">Días hábiles</th><th class="num">Solicitudes por día</th><th class="num">Analistas</th><th class="num">Analistas disponibles</th><th class="num">Productividad</th><th class="num">Tiempo mediano</th><th class="num">Meta</th><th class="num">En meta</th></tr></thead><tbody>
         ${DAC.PRODUCTOS.map((p) => fila(prodTag(p), M.porProducto[p], tiempoProd(p), M.depto.peso[p], '', `≤ ${metas()[p]} min`)).join('')}
         ${fila('Departamento', M.depto, tiempoProd(null), 1, 'total')}</tbody></table></div>
-        <p class="muted small">Incluye ${n0(M.depto.reestructuras)} reestructuras (cuentan para productividad; no para tiempos).</p></div>
+        <p class="muted small">Incluye ${n0(M.depto.reestructuras)} reestructuras (cuentan para productividad y tiempos).</p></div>
       <div class="card"><h3>Distribución del tiempo de la solicitud por producto</h3>${notaTiempos()}
         ${tablaTiempos(DAC.PRODUCTOS.map((p) => { const cs = casosDe(C, M.sols.filter((s) => s.producto === p)); return { nombre: prodTag(p), valores: cs, filas: cs.map((g) => filaTramo(g.tramo)) }; }), 'Producto', 'Tiempo de la solicitud')}</div>`;
   }
@@ -883,7 +882,7 @@
       const nCol = suma(col), montoCol = suma(col, (r) => r.monto_aprobado);
       const sols = M.sols.filter((s) => s.producto === p);
       // Tiempo por solicitud: el del caso más el preaprobado condicionado (no los reprocesos entre analistas)
-      const t = sols.filter((s) => !s.reestructura).map((s) => { const g = C.global(s); if (!g || g.segundos == null) return null;
+      const t = sols.map((s) => { const g = C.global(s); if (!g || g.segundos == null) return null;
         return g.segundos + (C.tramosPorSol.get(s.solicitud) || []).filter((x) => x.tipo === 'reproceso').reduce((a, x) => a + (C.segundosTramo(x) || 0), 0); }).filter((x) => x != null);
       const tReal = t.length ? t.reduce((a, b) => a + b, 0) / t.length : null;
       const x = M.porProducto[p];
